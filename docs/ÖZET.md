@@ -1,20 +1,21 @@
 ---
 tags: [özet, smart_workout, flutter, fitness]
 created: 2026-06-11
+updated: 2026-06-11
 type: summary
-related: [01_Mimari, 06_API, 07_İş_Mantığı]
+related: [01_Mimari, 06_Veritabanı, 07_İş_Mantığı]
 ---
 
 # Akıllı Antrenman — Proje Özeti
 
-> Türkçe, AI destekli, kişiselleştirilmiş antrenman programı oluşturan Flutter mobil uygulaması.  
-> Backend: PHP REST API · Frontend: Flutter/Dart · Depolama: SharedPreferences + API DB
+> Türkçe, kişiselleştirilmiş antrenman programı oluşturan Flutter mobil uygulaması.  
+> **Tamamen yerel:** PHP/API yok, SharedPreferences yok — sadece Dart, Flutter, SQLite.
 
 ---
 
 ## Ne Yapıyor?
 
-Kullanıcı **9 adımlı onboarding** tamamlar → fiziksel ölçüler + hedef toplanır → **BMI hesaplanır + program üretilir** → haftalık antrenman takvimi sunulur → kullanıcı her gün antrenmana başlar, timer/set takibi yapılır → tamamlanan antrenman API'ye kaydedilir → aylık ilerleme dashboard'da gösterilir.
+Kullanıcı **9 adımlı onboarding** tamamlar → fiziksel ölçüler + hedef + tercihler toplanır → **BMI hesaplanır + program adı üretilir** → SQLite'a kaydedilir → haftalık antrenman takvimi gösterilir → **yalnızca bugünün antrenmanı başlatılabilir** → tamamlanan antrenman SQLite'a yazılır → aylık ilerleme dashboard'da gösterilir.
 
 ---
 
@@ -24,22 +25,25 @@ Kullanıcı **9 adımlı onboarding** tamamlar → fiziksel ölçüler + hedef t
 İlk Açılış
   └──► OnboardingScreen (9 adım)
          ├── Nickname → Cinsiyet → Boy/Kilo/Yaş
-         ├── Hedef (Kilo Ver / Kas Kazan / Formda Kal)
-         ├── Hedef Kilo → Hedef Kaslar → Seviye → Günler → Ortam
-         └── POST /save_profile.php → user_id alınır
+         ├── Hedef → Hedef Kilo → Hedef Kaslar
+         ├── Seviye → Günler → Ortam
+         └── DatabaseService.insertUser() → user_id SQLite'a yazılır
                 └──► AnalysisLoadingScreen (4 sn animasyon)
                        └──► ProgramResultScreen (BMI + program önizleme)
                               └──► MainScreen (bottom nav)
 
 MainScreen (kalıcı)
   ├── Dashboard: aylık istatistik + BMI + program özeti
-  ├── Profile: metrikleri güncelle (kilo/günler)
-  └── History: geçmiş antrenmanlar
+  ├── Profile:  metrikleri güncelle (kilo / günler / hedef)
+  └── History:  geçmiş antrenmanlar
 
-WorkoutScheduleScreen (takvim)
-  └──► WorkoutSessionScreen (aktif antrenman)
-         ├── 10sn hazırlık → egzersiz timer → dinlenme timer
-         └── POST /complete_workout.php → kayıt
+WorkoutScheduleScreen
+  ├── Tam haftalık takvim her zaman görünür
+  ├── Bugünkü gün yeşil badge + "Başlat" butonu
+  └── Diğer günler kilitli (🔒)
+       └──► WorkoutSessionScreen (aktif antrenman)
+              ├── 10 sn hazırlık → egzersiz timer → dinlenme timer
+              └── DatabaseService.insertSession() → SQLite'a yaz
 ```
 
 ---
@@ -51,11 +55,11 @@ WorkoutScheduleScreen (takvim)
 | UI Framework | Flutter (Material 3) | Dark tema, neon yeşil accent |
 | Dil | Dart ^3.11.3 | |
 | State | `setState` | Provider/BLoC kullanılmamış |
-| Local Storage | SharedPreferences | user_id + profil cache |
-| HTTP | `http` paketi | JSON REST API |
-| Animasyon | Lottie + AnimatedContainer | Kutlama + geçişler |
-| Backend | PHP (192.168.1.23) | Geliştirme ortamı, HTTP |
-| Auth | user_id (no JWT/token) | Basit, geliştirme fazı |
+| Depolama | SQLite (sqflite ^2.4.2) | Tek DB, 2 tablo |
+| Egzersiz Verisi | Dart sabit listesi | `lib/data/exercise_data.dart` |
+| Animasyon | Lottie ^3.3.3 | Yerel asset (kutlama) |
+| GIF'ler | Yerel asset | `assets/exercises/man/` |
+| Backend | **Yok** | Tamamen offline |
 
 ---
 
@@ -63,11 +67,15 @@ WorkoutScheduleScreen (takvim)
 
 ```
 lib/
-├── main.dart              → giriş + routing
-├── models/                → 3 model (UserProfile, WorkoutProgram, WorkoutExercise)
-├── services/              → 2 servis (LocalStorage, WorkoutGenerator)
+├── main.dart                    → giriş + routing
+├── data/
+│   └── exercise_data.dart       → 38 egzersiz kataloğu + buildFilteredSchedule()
+├── models/                      → 3 model
+├── services/
+│   ├── database_service.dart    → SQLite CRUD + program üretme
+│   └── workout_generator_service.dart → BMI + program adı
 └── screens/
-    ├── main_screen.dart   → bottom nav container
+    ├── main_screen.dart
     ├── dashboard_screen.dart
     ├── profile_screen.dart
     ├── history_screen.dart
@@ -77,36 +85,34 @@ lib/
     ├── program_result_screen.dart
     └── onboarding/
         ├── onboarding_screen.dart
-        └── widgets/       → 9 adım widget'ı
+        └── widgets/              → 9 adım widget'ı
+
+assets/
+├── animations/                  → Lottie JSON (celebration.json)
+└── exercises/
+    └── man/                     → 34+ GIF dosyası
 ```
 
 ---
 
 ## Kritik İş Kuralları
 
-1. **Program seçimi** → `goal + gender` kombinasyonuna göre 3 seçenek (bkz. [[07_İş_Mantığı]])
-2. **Günlük limit** → Seviyeye göre: Başlangıç 3 gün, Orta 4, İleri 5
-3. **Hedef başarısı** → Kilo hedefine ulaşınca kutlama modal'ı + yeni hedef seçimi
-4. **BMI sınıflandırması** → 4 kategori, renk kodlu (bkz. [[07_İş_Mantığı]])
-5. **Logout** → Sadece local veri silinir, API'de session yok
+1. **Egzersiz filtreleme** → cinsiyet + ortam (ev/salon) + hedef kas + obezite kontrolü
+2. **Obezite güvenliği** → BMI ≥ 30 ise Box Jump, Burpees, Jumping Jack gibi yüksek darbeli egzersizler kaldırılır
+3. **Günlük kilit** → sadece bugünün antrenmanı başlatılabilir, diğer günler 🔒
+4. **Egzersiz rastgeleliği** → her takvim yüklemesinde farklı egzersiz kombinasyonu
+5. **Hedef başarısı** → kilo hedefine ulaşınca kutlama modal'ı
+6. **Logout** → DatabaseService.clearAll() → SQLite tamamen temizlenir
 
 ---
 
 ## Güçlü Yönler
 
+- Tamamen offline çalışır (internet bağlantısı gerektirmez)
 - Temiz, tutarlı dark UI tasarımı
-- İyi organize edilmiş dosya yapısı
-- Kapsamlı onboarding (9 adım, kişiselleştirme derinliği)
+- Kapsamlı egzersiz filtreleme (cinsiyet, ortam, kas grubu, obezite)
 - Aktif antrenman ekranı (timer, set sayacı, GIF) iyi düşünülmüş
-
-## Dikkat Edilmesi Gerekenler
-
-- Backend IP hardcoded (`192.168.1.23`) — prod için değişmeli
-- HTTP kullanıyor, HTTPS yok
-- user_id URL'de düz metin — güvenlik riski
-- SharedPreferences encrypt edilmemiş
-- State management büyüdükçe yönetilemez hale gelebilir
-- Network istekleri cache'lenmiyor (her ekran açılışında fetch)
+- Tek veritabanı dosyası — kurulum gerektirmez
 
 ---
 
@@ -117,7 +123,7 @@ lib/
 - Servisler: [[03_Servisler]]
 - Ekranlar: [[04_Ekranlar]]
 - Onboarding akışı: [[05_Onboarding]]
-- API endpoint listesi: [[06_API]]
+- SQLite şema: [[06_Veritabanı]]
 - İş mantığı kuralları: [[07_İş_Mantığı]]
 - Tasarım sistemi: [[08_Tasarım_Sistemi]]
 - Veri akışı diyagramı: [[09_Veri_Akışı]]

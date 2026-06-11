@@ -1,8 +1,9 @@
 ---
 tags: [ekranlar, ui, flutter-screens]
 created: 2026-06-11
+updated: 2026-06-11
 type: screens
-related: [01_Mimari, 05_Onboarding, 06_API, 09_Veri_Akışı]
+related: [01_Mimari, 05_Onboarding, 06_Veritabanı, 09_Veri_Akışı]
 ---
 
 # Ekranlar
@@ -46,7 +47,7 @@ Tab 2: 📋 Geçmiş
 
 ## dashboard_screen.dart
 
-**API:** `GET /api/get_progress.php?user_id=<id>`
+**Veri:** `DatabaseService.getDashboardData(userId)` — SQLite (users + workout_sessions)
 
 **İçerik:**
 - Hoşgeldin mesajı (kullanıcı adıyla)
@@ -57,74 +58,71 @@ Tab 2: 📋 Geçmiş
 - **BMI Analiz Kartı** — VKİ değeri + renk kodlu durum rozeti
 - **Aktif Program Kartı** — program adı, açıklama, kategori
 - "Antrenman Takvimini Aç" butonu → WorkoutScheduleScreen
-- Logout butonu → `LocalStorageService.clearAll()` → OnboardingScreen
+- Logout butonu → `DatabaseService.clearAll()` → OnboardingScreen
 
 ---
 
 ## profile_screen.dart
 
-**API'ler:**
-- `GET /api/get_profile.php?user_id=<id>`
-- `POST /api/update_workout_days.php`
-- `POST /api/update_weight.php`
-- `POST /api/update_goal_and_weight.php` (hedef başarısı sonrası)
+**Veri:** `DatabaseService.getUser(userId)` — SQLite users tablosu
 
 **İçerik:**
 - Kullanıcı avatar'ı (baş harflerle)
 - Program adı ve açıklaması
 - 2×3 metrik grid: Boy, Kilo, Yaş, Hedef, Seviye, Ortam
-- "Antrenman Günlerimi Değiştir" → bottom sheet (checkbox günler)
-- "Güncel Kilo Gir" → bottom sheet (slider + kaydet)
+- "Antrenman Günlerimi Değiştir" → bottom sheet → `updateWorkoutDays()`
+- "Güncel Kilo Gir" → bottom sheet → `updateWeight()`
 
 **Hedef Başarısı Mantığı:**
 ```
-Kilo Ver + yeni_kilo <= hedef_kilo → 🎉 modal
-Kas Kazan + yeni_kilo >= hedef_kilo → 🎉 modal
-  → Seçenek: Yeni hedef koy | Formda kal
+Kilo Ver + yeni_kilo <= hedef_kilo  → 🎉 Kutlama Modal
+Kas Kazan + yeni_kilo >= hedef_kilo → 🎉 Kutlama Modal
+  Seçenek A: Yeni hedef koy → OnboardingScreen
+  Seçenek B: Formda kal     → DatabaseService.updateGoalAndWeight()
 ```
 
-**Lottie Animasyon:** Kutlama modal'ında oynatılır (network URL'den)
+**Lottie Animasyon:** `assets/animations/celebration.json` (yerel asset)
 
 ---
 
 ## history_screen.dart
 
-**API:** `GET /api/get_history.php?user_id=<id>`
+**Veri:** `DatabaseService.getHistory(userId)` — SQLite workout_sessions tablosu
 
 **İçerik:**
 - Tamamlanan antrenmanlar listesi (en yeni önce)
-- Her öğede:
-  - Program adı
-  - Tarih (DD/MM/YYYY formatı)
-  - Süre (dakika)
-  - Set ve egzersiz sayısı
-  - Renk kodlu rozetler
+- Her öğede: program adı, tarih, süre (dakika), set ve egzersiz sayısı, renk kodlu rozetler
 
 ---
 
 ## workout_schedule_screen.dart
 
-**API:** `GET /api/get_workout.php?user_id=<id>`
+**Veri:** `DatabaseService.getScheduleData(userId)`  
+→ İçeride `buildFilteredSchedule()` çağrılır — egzersiz kataloğundan dinamik üretim
 
-**Response'daki `today_state` değerleri:**
+**`today_state` davranışları:**
 
 | today_state | Gösterilen |
 |-------------|-----------|
-| `workout_time` | Normal takvim + "Antrenmanı Başlat" butonu |
-| `already_done` | "Bugünlük Bu Kadar! 🎉" mesajı |
-| `rest` | "Dinlenme Günü ☕" mesajı |
+| `workout_time` | Bugüne "Antrenmanı Başlat" butonu aktif |
+| `already_done` | Bugüne "Tamamlandı" badge'i |
+| `rest` | Status banner: "Dinlenme Günü ☕" |
 
-**İçerik:**
-- Haftalık takvim (genişletilebilir gün kartları)
-- Her günde egzersiz listesi: `isim × set × tekrar`
-- Aktif güne ait "Antrenmanı Başlat" → WorkoutSessionScreen
+**İçerik (tüm durumlarda tam takvim gösterilir):**
+- Haftalık program (genişletilebilir gün kartları) — **her zaman görünür**
+- Bugünkü gün: yeşil badge + "Bugün" etiketi
+- Diğer günler: 🔒 simgesi + "Sadece bu gün açılabilir"
+- Her günde egzersiz listesi: isim × set × tekrar
+- Bugünkü güne "Antrenmanı Başlat" → WorkoutSessionScreen
 
 ---
 
 ## workout_session_screen.dart
 
 **Rol:** Aktif antrenman yöneticisi  
-**API (tamamlama):** `POST /api/complete_workout.php`
+**Tamamlama:** `DatabaseService.insertSession(...)` — SQLite workout_sessions tablosu
+
+**Parametre:** `exercisesRaw` (List\<dynamic\>) + `programName` (String)
 
 ### Aşamalar
 
@@ -133,23 +131,23 @@ Kas Kazan + yeni_kilo >= hedef_kilo → 🎉 modal
    └── "Skip" butonu ile atlanabilir
 
 2. AKTİF EGZERSİZ
-   ├── Egzersiz adı + GIF (network'ten)
+   ├── Egzersiz adı + GIF (yerel asset: assets/exercises/man/)
    ├── Timer (saniye sayacı)
    ├── Set sayacı (animasyonlu progress)
    └── Pause/Resume
 
-3. DİNLENME (60 saniye, ayarlanabilir)
+3. DİNLENME (20–90 saniye — goal+level'e göre)
    ├── Geri sayım
    ├── "Skip" butonu
    └── Sonraki set/egzersiz'e geç
 
 4. TAMAMLAMA
-   ├── POST /complete_workout.php
+   ├── DatabaseService.insertSession(userId, ...)
    ├── Başarı modal'ı
    └── MainScreen'e dön
 ```
 
-**State Yönetimi:** Timer'lar `Timer.periodic` ile, dispose'da iptal edilir.
+**GIF gösterimi:** `Image.asset(imagePath, fit: BoxFit.contain)` — hata durumunda placeholder.
 
 ---
 
@@ -169,20 +167,21 @@ Kas Kazan + yeni_kilo >= hedef_kilo → 🎉 modal
 
 ## program_result_screen.dart
 
-**Rol:** Onboarding sonunda üretilen programı önizleme + onaylama
+**Rol:** Onboarding sonunda üretilen programı önizleme + onaylama  
+**Not:** Veriler zaten SQLite'a yazılmıştır (insertUser çağrıldı). Bu ekran sadece gösterim yapar.
 
 **İçerik:**
 - BMI kartı (görsel ölçek, değer, kategori)
 - Program adı, açıklama, istatistikler
 - Haftalık takvim grid'i (seçilen günler renkli)
-- "Programı Onayla ve Kaydet" → MainScreen
+- "Programı Onayla ve Başla" → MainScreen
 
 ---
 
 ## Bağlantılar
 
 - [[05_Onboarding]] — 9 adımlı kayıt ekranı
-- [[06_API]] — her ekranın kullandığı endpoint'ler
+- [[06_Veritabanı]] — her ekranın kullandığı tablo/metod
 - [[07_İş_Mantığı]] — hedef başarısı ve program kuralları
 - [[08_Tasarım_Sistemi]] — renk ve UI kararları
 - [[09_Veri_Akışı]] — ekranlar arası navigasyon akışı

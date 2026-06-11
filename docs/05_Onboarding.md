@@ -1,8 +1,9 @@
 ---
 tags: [onboarding, kullanıcı-akışı, kayıt]
 created: 2026-06-11
+updated: 2026-06-11
 type: feature
-related: [02_Modeller, 06_API, 09_Veri_Akışı]
+related: [02_Modeller, 06_Veritabanı, 09_Veri_Akışı]
 ---
 
 # Onboarding Akışı
@@ -17,7 +18,7 @@ related: [02_Modeller, 06_API, 09_Veri_Akışı]
 - `PageView` + `PageController` ile 9 adım arasında gezinme
 - Her adım `lib/screens/onboarding/widgets/` altında ayrı widget
 - `UserProfile` nesnesi OnboardingScreen state'inde biriktirilir
-- Son adımdan sonra API çağrısı → program üretimi → MainScreen
+- Son adımdan sonra **SQLite'a kayıt** → program üretimi → MainScreen
 
 ---
 
@@ -34,7 +35,7 @@ related: [02_Modeller, 06_API, 09_Veri_Akışı]
 **Input:** Görsel kart seçimi (iki kart)  
 **Seçenekler:** `Erkek` | `Kadın`  
 **Veri:** `UserProfile.gender`  
-**UI:** Her cinsiyet için illüstrasyon + seçim animasyonu
+**Önemi:** Egzersiz filtrelemede kullanılır (bkz. [[07_İş_Mantığı]] §3.2)
 
 ### Adım 3 — PhysicalStep
 **Dosya:** `physical_step.dart`  
@@ -44,54 +45,41 @@ related: [02_Modeller, 06_API, 09_Veri_Akışı]
 - `UserProfile.height` (varsayılan: 175.0 cm)
 - `UserProfile.weight` (varsayılan: 70.0 kg)
 
+**Not:** Weight + Height → BMI hesabı → Obezite kontrolü
+
 ### Adım 4 — GoalStep
 **Dosya:** `goal_step.dart`  
-**Input:** Genişletilebilir liste (tek seçim)  
-**Seçenekler:**
-- `Kilo Ver`
-- `Kas Kütlesi Kazan`
-- `Formda Kal`
-
+**Seçenekler:** `Kilo Ver` | `Kas Kütlesi Kazan` | `Formda Kal`  
 **Veri:** `UserProfile.goal`  
-**Kritik:** Bu seçim program tipini belirler (bkz. [[07_İş_Mantığı]])
+**Kritik:** Program tipini belirler (bkz. [[07_İş_Mantığı]] §1)
 
 ### Adım 5 — TargetWeightStep
 **Dosya:** `target_weight_step.dart`  
 **Input:** Slider (dinamik aralık)  
-**Aralık:** Mevcut kiloya göre hesaplanır  
-- Kilo Ver → hedef mevcut kilodan düşük
-- Kas Kazan → hedef mevcut kilodan yüksek
-
 **Veri:** `UserProfile.targetWeight`
 
 ### Adım 6 — TargetMusclesStep
 **Dosya:** `target_muscles_step.dart`  
-**Input:** Çoklu seçim (checkbox benzeri kartlar)  
+**Input:** Çoklu seçim kartlar  
 **Seçenekler:** `Full Body` | `Göğüs` | `Sırt` | `Kollar` | `Bacak` | `Karın`  
-**Veri:** `UserProfile.targetMuscles` (List<String>)
+**Veri:** `UserProfile.targetMuscles` (List\<String\>)  
+**Önemi:** Egzersiz kas grubu rotasyonunu belirler (bkz. [[07_İş_Mantığı]] §3.4)
 
 ### Adım 7 — LevelStep
 **Dosya:** `level_step.dart`  
-**Input:** Radio button (tek seçim)  
-**Seçenekler:**
-- `Yeni Başlayan` → max 3 antrenman günü
-- `Orta` → max 4 antrenman günü
-- `İleri` → max 5 antrenman günü
-
-**Veri:** `UserProfile.level`  
-**Kritik:** Sonraki adımdaki seçilebilir gün sayısını sınırlar
+**Seçenekler:** `Yeni Başlayan` (4 egzersiz/gün) | `Orta` (5) | `İleri` (6)  
+**Veri:** `UserProfile.level`
 
 ### Adım 8 — WorkoutDaysStep
 **Dosya:** `workout_days_step.dart`  
 **Input:** Gün seçimi (Pazartesi–Pazar, checkbox)  
-**Kısıt:** Level'e göre max seçilebilir gün sayısı  
-**Veri:** Seçilen günler listesi (API'ye string olarak gönderilir)
+**Veri:** Seçilen günler listesi (SQLite'a `'Pazartesi,Çarşamba,Cuma'` olarak yazılır)
 
 ### Adım 9 — EnvironmentStep
 **Dosya:** `environment_step.dart`  
-**Input:** İki büyük kart butonu  
 **Seçenekler:** `Ev` | `Spor Salonu`  
-**Veri:** `UserProfile.environment`
+**Veri:** `UserProfile.environment`  
+**Önemi:** Egzersiz ortam filtresini belirler (bkz. [[07_İş_Mantığı]] §3.1)
 
 ---
 
@@ -100,24 +88,20 @@ related: [02_Modeller, 06_API, 09_Veri_Akışı]
 ```
 Adım 9 tamamlandı
   │
-  ├── 1. POST /api/save_profile.php
-  │       { nickname, gender, age, height, weight, goal,
-  │         target_weight, environment, level,
-  │         workout_days, target_muscles }
-  │       ← { status: 'success', user_id: <int> }
+  ├── 1. DatabaseService.insertUser(profile, selectedDays)
+  │       → users tablosuna yazılır
+  │       → user_id döner (AUTO_INCREMENT)
+  │       → DatabaseService.savedUserId = user_id
   │
-  ├── 2. LocalStorageService.saveUserId(user_id)
-  ├── 3. LocalStorageService.saveUserProfile(profile)
+  ├── 2. WorkoutGeneratorService.generateProgram(profile)
+  │       → WorkoutProgram (sadece önizleme, DB'ye yazılmaz)
   │
-  ├── 4. WorkoutGeneratorService.generateProgram(profile)
-  │       ← WorkoutProgram
-  │
-  ├── 5. LocalStorageService.saveWorkoutProgram(program)
-  │
-  └── 6. Navigator → AnalysisLoadingScreen (4 sn)
+  └── 3. Navigator → AnalysisLoadingScreen (4 sn)
               └── Navigator → ProgramResultScreen
                         └── [Onayla] → MainScreen
 ```
+
+**Eski mimariden fark:** API çağrısı yoktur. `POST /save_profile.php` yerine doğrudan SQLite yazması.
 
 ---
 
@@ -143,6 +127,6 @@ class XxxStep extends StatefulWidget {
 ## Bağlantılar
 
 - [[02_Modeller]] — UserProfile modeli
-- [[06_API]] — save_profile.php detayı
-- [[07_İş_Mantığı]] — program seçim kuralları
+- [[06_Veritabanı]] — SQLite users tablosu
+- [[07_İş_Mantığı]] — program seçim ve filtreleme kuralları
 - [[04_Ekranlar]] — onboarding sonrası ekranlar

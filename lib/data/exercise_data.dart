@@ -149,7 +149,7 @@ List<Map<String, dynamic>> _pickForDay({
   final result = <Map<String, dynamic>>[];
   final used = <String>{};
 
-  // 1. Seçilen kaslardan egzersiz seç (random sırayla)
+  // Sadece hedef kas egzersizlerini seç — yetmezse eksik kalır, alakasız kas çıkmaz
   for (final muscle in muscles) {
     for (final ex in shuffled) {
       if (result.length >= count) break;
@@ -160,28 +160,6 @@ List<Map<String, dynamic>> _pickForDay({
       }
     }
     if (result.length >= count) break;
-  }
-
-  // 2. Hâlâ eksik kaldıysa (nadir durum): full_body egzersizler öncelikli, sonra herhangi biri
-  if (result.length < count) {
-    for (final ex in shuffled) {
-      if (result.length >= count) break;
-      final name = ex['name'] as String;
-      if (!used.contains(name) && ex['muscle'] == 'full_body') {
-        result.add(_entry(ex, params));
-        used.add(name);
-      }
-    }
-  }
-  if (result.length < count) {
-    for (final ex in shuffled) {
-      if (result.length >= count) break;
-      final name = ex['name'] as String;
-      if (!used.contains(name)) {
-        result.add(_entry(ex, params));
-        used.add(name);
-      }
-    }
   }
 
   return result;

@@ -1,6 +1,7 @@
 ---
 tags: [index, vault-root, smart_workout]
 created: 2026-06-11
+updated: 2026-06-11
 type: index
 ---
 
@@ -29,11 +30,11 @@ docs/
 ├── ÖZET.md              ← üst düzey özet
 ├── 01_Mimari.md         ← mimari + klasör yapısı
 ├── 02_Modeller.md       ← UserProfile, WorkoutProgram, WorkoutExercise
-├── 03_Servisler.md      ← LocalStorageService, WorkoutGeneratorService
+├── 03_Servisler.md      ← DatabaseService, WorkoutGeneratorService, exercise_data
 ├── 04_Ekranlar.md       ← tüm ekranlar
 ├── 05_Onboarding.md     ← 9 adımlı kayıt akışı
-├── 06_API.md            ← tüm PHP endpoint'leri
-├── 07_İş_Mantığı.md     ← BMI, program seçimi, goal achievement
+├── 06_Veritabanı.md     ← SQLite şema + DatabaseService metodları
+├── 07_İş_Mantığı.md     ← BMI, program seçimi, egzersiz filtreleme
 ├── 08_Tasarım_Sistemi.md← renkler, tipografi, animasyonlar
 └── 09_Veri_Akışı.md     ← state + navigation akışı
 ```
@@ -45,10 +46,11 @@ docs/
 - **App Adı:** Akıllı Antrenman (`akilli_antreman`)
 - **Platform:** Flutter 3.x · Dart SDK ^3.11.3
 - **Dil:** Türkçe (hardcoded, i18n yok)
-- **Backend:** PHP API → `http://192.168.1.23/api/`
-- **Local Storage:** SharedPreferences (SQLite/Hive yok)
+- **Backend:** Yok — tamamen yerel SQLite (sqflite)
+- **Depolama:** SQLite — `akilli_antreman.db` (2 tablo)
 - **State Management:** `setState` (Provider/BLoC yok)
 - **Tema:** Material 3 Dark · Primary `#00FF87` Neon Yeşil
+- **Egzersizler:** 38 egzersiz, yerel GIF asset (`assets/exercises/man/`)
 
 ---
 
@@ -61,12 +63,12 @@ docs/
  │    ├── 03_Servisler
  │    └── 04_Ekranlar
  │         └── 05_Onboarding
- ├── 06_API
+ ├── 06_Veritabanı
  ├── 07_İş_Mantığı
  │    ├── 02_Modeller
  │    └── 03_Servisler
  ├── 08_Tasarım_Sistemi
  └── 09_Veri_Akışı
-      ├── 06_API
+      ├── 06_Veritabanı
       └── 04_Ekranlar
 ```

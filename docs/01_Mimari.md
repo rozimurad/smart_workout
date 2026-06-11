@@ -1,6 +1,7 @@
 ---
 tags: [mimari, flutter, klasör-yapısı]
 created: 2026-06-11
+updated: 2026-06-11
 type: architecture
 related: [ÖZET, 02_Modeller, 03_Servisler, 04_Ekranlar]
 ---
@@ -14,19 +15,22 @@ related: [ÖZET, 02_Modeller, 03_Servisler, 04_Ekranlar]
 ## Katmanlı Yapı
 
 ```
-┌─────────────────────────────────────────┐
-│              UI (Screens)               │  ← lib/screens/
-│  Onboarding │ Main │ Workout │ History  │
-├─────────────────────────────────────────┤
-│             Services Katmanı            │  ← lib/services/
-│  LocalStorageService │ WorkoutGenerator │
-├─────────────────────────────────────────┤
-│              Models Katmanı             │  ← lib/models/
-│  UserProfile │ WorkoutProgram │ Exercise │
-├─────────────────────────────────────────┤
-│         Dış Bağımlılıklar               │
-│  SharedPreferences │ PHP REST API       │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│                UI (Screens)                 │  ← lib/screens/
+│  Onboarding │ Main │ Workout │ History      │
+├─────────────────────────────────────────────┤
+│              Services Katmanı               │  ← lib/services/
+│  DatabaseService │ WorkoutGeneratorService  │
+├─────────────────────────────────────────────┤
+│               Data Katmanı                  │  ← lib/data/
+│  exercise_data.dart (38 egzersiz kataloğu)  │
+├─────────────────────────────────────────────┤
+│              Models Katmanı                 │  ← lib/models/
+│  UserProfile │ WorkoutProgram │ Exercise    │
+├─────────────────────────────────────────────┤
+│           Yerel Depolama                    │
+│  SQLite — akilli_antreman.db (sqflite)      │
+└─────────────────────────────────────────────┘
 ```
 
 ---
@@ -37,13 +41,15 @@ related: [ÖZET, 02_Modeller, 03_Servisler, 04_Ekranlar]
 smart_workout/
 ├── lib/
 │   ├── main.dart
+│   ├── data/
+│   │   └── exercise_data.dart         ← 38 egzersiz + buildFilteredSchedule()
 │   ├── models/
 │   │   ├── user_profile.dart
 │   │   ├── workout_program.dart
 │   │   └── workout_exercise.dart
 │   ├── services/
-│   │   ├── local_storage_service.dart
-│   │   └── workout_generator_service.dart
+│   │   ├── database_service.dart      ← SQLite CRUD (users + workout_sessions)
+│   │   └── workout_generator_service.dart ← BMI + program adı üretme
 │   └── screens/
 │       ├── main_screen.dart
 │       ├── dashboard_screen.dart
@@ -65,14 +71,12 @@ smart_workout/
 │               ├── level_step.dart
 │               ├── workout_days_step.dart
 │               └── environment_step.dart
-├── android/
-├── ios/
-├── web/
-├── windows/
-├── linux/
-├── macos/
+├── assets/
+│   ├── animations/
+│   │   └── celebration.json           ← Lottie kutlama animasyonu
+│   └── exercises/
+│       └── man/                       ← 34+ GIF dosyası (yerel)
 ├── pubspec.yaml
-├── pubspec.lock
 └── analysis_options.yaml
 ```
 
@@ -83,17 +87,16 @@ smart_workout/
 **Yaklaşım:** `setState` — sade StatefulWidget
 
 **Neden Provider/BLoC yok?**
-- Uygulama nispeten küçük
+- Uygulama nispeten küçük ve tek kullanıcılı
 - Karmaşık cross-screen state paylaşımı yok
-- Kullanıcı profili uygulama başlangıcında bir kez yükleniyor
-- API verisi her ekranda kendi initState'inde çekiliyor
+- `DatabaseService.savedUserId` static field ile sync erişim yeterli
 
 **State Akışı:**
 ```
-main() → LocalStorageService.init()
-  → user_id var mı?
-      ├── Evet → MainScreen (bottom nav)
-      └── Hayır → OnboardingScreen
+main() → DatabaseService.init()
+  → savedUserId var mı?
+      ├── Evet → MainScreen (mevcut kullanıcı)
+      └── Hayır → OnboardingScreen (yeni kullanıcı)
 ```
 
 ---
@@ -110,6 +113,7 @@ routes: {
 ```
 
 **Kullanılan Pattern'ler:**
+
 | Pattern | Kullanım Yeri |
 |---------|---------------|
 | `push()` | Yeni ekran açmak |
@@ -125,9 +129,9 @@ routes: {
 dependencies:
   flutter: SDK
   cupertino_icons: ^1.0.8      # iOS ikonları
-  http: ^1.2.1                  # REST API istekleri
-  shared_preferences: ^2.5.5   # Local kalıcı depolama
-  lottie: ^3.3.3               # Kutlama animasyonları
+  sqflite: ^2.4.2              # SQLite veritabanı
+  path: ^1.9.1                 # DB dosya yolu
+  lottie: ^3.3.3               # Kutlama animasyonu (yerel asset)
 
 dev_dependencies:
   flutter_test: SDK
@@ -135,22 +139,21 @@ dev_dependencies:
 ```
 
 **Kasıtlı olarak yok:**
-- Firebase (custom PHP backend var)
-- SQLite / Hive (SharedPreferences yeterli)
+- `http` / Firebase (backend yok, tamamen offline)
+- `shared_preferences` (SQLite her şeyi karşılıyor)
 - Provider / Riverpod / BLoC (setState yeterli)
-- GoRouter (basit routing)
+- GoRouter (basit 2-route yapı)
 
 ---
 
 ## Platform Desteği
 
-Proje tüm Flutter platformlarını destekliyor:
-- Android ✓
-- iOS ✓
-- Web ✓
-- Windows ✓
-- Linux ✓
-- macOS ✓
+| Platform | Durum |
+|----------|-------|
+| Android | ✓ Birincil hedef |
+| iOS | ✓ |
+| Web | — sqflite web desteklemez |
+| Windows / Linux / macOS | — sqflite masaüstü için ek setup gerektirir |
 
 ---
 
@@ -159,5 +162,5 @@ Proje tüm Flutter platformlarını destekliyor:
 - [[02_Modeller]] — veri sınıfları detayı
 - [[03_Servisler]] — servis katmanı detayı
 - [[04_Ekranlar]] — tüm ekranlar
-- [[06_API]] — backend iletişimi
+- [[06_Veritabanı]] — SQLite şema
 - [[09_Veri_Akışı]] — uçtan uca akış

@@ -1,70 +1,167 @@
 ---
-tags: [servisler, shared-preferences, bmi, program-generation]
+tags: [servisler, sqlite, sqflite, bmi, program-generation, exercise-filter]
 created: 2026-06-11
+updated: 2026-06-11
 type: services
-related: [01_Mimari, 02_Modeller, 06_API, 07_İş_Mantığı]
+related: [01_Mimari, 02_Modeller, 06_Veritabanı, 07_İş_Mantığı]
 ---
 
 # Servisler
 
-> `lib/services/` altındaki 2 servis sınıfı. Tüm business logic ve storage burada.
+> `lib/services/` ve `lib/data/` altındaki servis ve veri katmanı.  
+> Tüm iş mantığı ve depolama buradadır — HTTP/API yoktur.
 
 ---
 
-## LocalStorageService
+## DatabaseService
 
-**Dosya:** `lib/services/local_storage_service.dart`  
-**Tip:** Static class, SharedPreferences wrapper  
-**Amaç:** Kullanıcı verisini cihazda cache'lemek, API çağrısı olmadan hızlı erişim
+**Dosya:** `lib/services/database_service.dart`  
+**Tip:** Singleton  
+**Amaç:** SQLite üzerinden kullanıcı ve antrenman verisi CRUD işlemleri + haftalık program üretme
 
 ### Başlatma
 
 ```dart
 // main.dart içinde:
-await LocalStorageService.init();
-// SharedPreferences instance'ı yükler, sync erişim için hazır hale getirir
+await DatabaseService.init();
+// DB dosyasını açar, tabloları oluşturur, son user_id'yi cache'ler
 ```
 
-### Metodlar
+### Static Erişim
 
 ```dart
-static Future<void> init()
-// Uygulama başlangıcında çağrılır. SP instance'ını hazırlar.
-
-static Future<bool> saveUserId(dynamic userId)
-// Onboarding sonrası API'den gelen user_id'yi kaydeder
-
-static dynamic getSavedUserId()
-// user_id'yi senkron okur (await gerekmez)
+static int? get savedUserId
+// Senkron erişim — await gerekmez
 // null ise → kullanıcı onboarding yapmamış
-
-static Future<bool> saveUserProfile(UserProfile profile)
-// Tüm UserProfile alanlarını SP'ye yazar (JSON değil, field field)
-
-static UserProfile? getSavedProfile()
-// SP'den UserProfile reconstruct eder
-
-static Future<bool> saveWorkoutProgram(WorkoutProgram program)
-// WorkoutProgram'ı cache'ler
-
-static WorkoutProgram? getSavedProgram()
-// Cache'teki programı okur
-
-static bool isProfileSaved()
-// Hızlı kontrol: profil kaydedilmiş mi?
-
-static Future<void> clearAll()
-// Tüm SP verisini siler → Logout işlevi
 ```
 
-### Cache'lenen Anahtarlar
+### Kullanıcı Metodları
 
+```dart
+Future<int> insertUser(UserProfile profile, List<String> workoutDays)
+// Onboarding tamamlanınca çağrılır → SQLite'a yazar, user_id döndürür
+
+Future<Map<String, dynamic>?> getUser(int userId)
+// users tablosundan tek satır çeker
+
+Future<void> updateWorkoutDays(int userId, List<String> days)
+// Profil ekranından antrenman günleri güncelleme
+
+Future<void> updateWeight(int userId, double weight)
+// Güncel kilo güncelleme
+
+Future<void> updateGoalAndWeight(int userId, String goal, double weight)
+// Hedef başarısı sonrası yeni hedef / formda kal
+
+Future<void> clearAll()
+// Tüm users + workout_sessions siler → Logout
 ```
-user_id, nickname, gender, age, height, weight,
-goal, level, environment, target_muscles (JSON string),
-target_weight, program_adi, program_aciklama,
-program_gun_sayisi, program_kategori
+
+### Antrenman Metodları
+
+```dart
+Future<void> insertSession({
+  required int userId,
+  required String programName,
+  required int totalTimeSeconds,
+  required int totalExercises,
+  required int totalSets,
+})
+// Antrenman bitince kaydeder
+
+Future<List<Map<String, dynamic>>> getHistory(int userId)
+// Geçmiş antrenmanlar (DESC sırali)
 ```
+
+### Dashboard ve Takvim
+
+```dart
+Future<Map<String, dynamic>> getDashboardData(int userId)
+// Döndürür: user_name, bmi_value, bmi_status, progress_percentage,
+//           monthly_time_minutes, monthly_sets, monthly_exercises,
+//           completed_workouts, monthly_target
+
+Future<Map<String, dynamic>> getScheduleData(int userId)
+// Döndürür: today_state, message, schedule, program_title, today_day_name
+// schedule = buildFilteredSchedule() çıktısı (her açılışta yeniden üretilir)
+```
+
+**`today_state` değerleri:**
+
+| Değer | Anlam |
+|-------|-------|
+| `workout_time` | Bugün antrenman günü, henüz yapılmadı |
+| `already_done` | Bugün zaten tamamlandı |
+| `rest` | Bugün dinlenme günü |
+
+---
+
+## exercise_data.dart
+
+**Dosya:** `lib/data/exercise_data.dart`  
+**Tip:** Sabit liste + filtre fonksiyonları  
+**Amaç:** 38 egzersizin kataloğu ve kullanıcı profiline göre filtrelenmiş program üretme
+
+### Egzersiz Kataloğu
+
+```dart
+const List<Map<String, dynamic>> kAllExercises = [
+  {
+    'name': 'Push-up',
+    'gif': 'pushup-man.gif',         // assets/exercises/man/ altında
+    'muscle': 'gogus',               // gogus | sirt | kol | bacak | karin | full_body
+    'env': 'ev',                     // ev | salon | hepsi
+    'gender': 'hepsi',               // erkek | kadin | hepsi
+    'high_impact': false,            // true → obezlerde gösterilmez
+  },
+  // ... 37 egzersiz daha
+];
+```
+
+**`high_impact: true` olan egzersizler** (BMI ≥ 30 kullanıcılarda çıkarılır):
+- Burpees, Jumping Jack, High Knees, Squat Jump, Mountain Climber, Box Jump
+
+### Ana Fonksiyon
+
+```dart
+Map<String, List<Map<String, dynamic>>> buildFilteredSchedule({
+  required List<String> userDays,      // ['Pazartesi', 'Çarşamba', 'Cuma']
+  required String gender,              // 'Erkek' | 'Kadın'
+  required String environment,         // 'Ev' | 'Spor Salonu'
+  required List<String> targetMuscles, // ['Göğüs', 'Kollar']
+  required String goal,                // 'Kilo Ver' | 'Kas Kütlesi Kazan' | ...
+  required String level,               // 'Yeni Başlayan' | 'Orta' | 'İleri'
+  double weight,                       // kg (obezite kontrolü için)
+  double height,                       // cm (obezite kontrolü için)
+})
+```
+
+**Filtre adımları:**
+1. `env` → ev / salon / hepsi
+2. `gender` → erkek / kadin / hepsi
+3. `high_impact` → BMI ≥ 30 ise `true` olanlar çıkar
+4. Kas rotasyonu: seçilen kaslar arasında döngü (Gün 1 = 1. kas, Gün 2 = 2. kas, ...)
+5. Her gün `Random()` ile karıştırılmış listeden seçilir (her açılışta farklı)
+6. Eksik slot: önce `full_body` egzersizler, sonra herhangi uygun egzersiz
+
+**Gün başına egzersiz sayısı:**
+
+| Seviye | Egzersiz/Gün |
+|--------|-------------|
+| Yeni Başlayan | 4 |
+| Orta | 5 |
+| İleri | 6 |
+
+**Set/Tekrar/Dinlenme parametreleri:**
+
+| Hedef | Set | Tekrar | Dinlenme |
+|-------|-----|--------|---------|
+| Kilo Ver (Başlangıç) | 3 | 15 | 30 sn |
+| Kilo Ver (İleri) | 3 | 20 | 20 sn |
+| Kas Kazan (Başlangıç) | 3 | 10 | 90 sn |
+| Kas Kazan (Orta) | 4 | 10 | 90 sn |
+| Kas Kazan (İleri) | 5 | 8 | 90 sn |
+| Formda Kal | 3–4 | 12–15 | 45–60 sn |
 
 ---
 
@@ -72,21 +169,15 @@ program_gun_sayisi, program_kategori
 
 **Dosya:** `lib/services/workout_generator_service.dart`  
 **Tip:** Static utility class  
-**Amaç:** BMI hesaplamak ve kullanıcı profiline göre lokal program üretmek
-
-> **Not:** API'den program gelmez, program lokal olarak bu servis üretir. API ise egzersizleri ve takvimi verir.
+**Amaç:** BMI hesaplamak ve program adı/meta üretmek
 
 ### BMI Hesaplama
 
 ```dart
 static double calculateBMI(double heightCm, double weightKg)
 // BMI = weight / (height_m)²
-// Örn: 70kg / (1.75m)² = 22.86
-```
+// Örn: 70 / (1.75)² = 22.86
 
-### BMI Değerlendirme
-
-```dart
 static BMIEvaluation evaluateBMI(double bmi)
 // Döndürür: { category, description, color }
 ```
@@ -94,9 +185,9 @@ static BMIEvaluation evaluateBMI(double bmi)
 | Aralık | Kategori | Renk |
 |--------|----------|------|
 | < 18.5 | Zayıf | Cyan `#00E5FF` |
-| 18.5–25 | Normal | Neon Yeşil `#00FF87` |
-| 25–30 | Fazla Kilolu | Gold `#FFD700` |
-| > 30 | Obez | Kırmızı `#FF3366` |
+| 18.5–24.9 | Normal | Neon Yeşil `#00FF87` |
+| 25–29.9 | Fazla Kilolu | Gold `#FFD700` |
+| ≥ 30 | Obez | Kırmızı `#FF3366` |
 
 ### Program Üretme
 
@@ -104,17 +195,13 @@ static BMIEvaluation evaluateBMI(double bmi)
 static WorkoutProgram generateProgram(UserProfile profile)
 ```
 
-**Karar Ağacı:**
+Karar ağacı:
 ```
-goal içeriyor 'Kilo Ver'?
-  └── EVET → HIIT Fat Burn (4 gün/hafta)
-
-goal içeriyor 'Kas' veya 'Hacim'?
-  ├── gender == 'Erkek' → Üst Vücut Hipertrofi (5 gün)
-  └── gender == 'Kadın' → Alt Vücut Hipertrofi (5 gün)
-
-Diğer (Formda Kal):
-  └── Full Body Kondisyon (3 gün/hafta)
+goal içeriyor 'Kilo Ver' ?  → HIIT Fat Burn      (4 gün)
+goal içeriyor 'Kas'?
+  gender == 'Erkek'         → Üst Vücut Hipertrofi (5 gün)
+  gender == 'Kadın'         → Alt Vücut Hipertrofi  (5 gün)
+Diğer                       → Full Body Kondisyon   (3 gün)
 ```
 
 ---
@@ -123,26 +210,31 @@ Diğer (Formda Kal):
 
 ```
 main.dart
-  └── LocalStorageService.init()
+  └── DatabaseService.init()
 
 OnboardingScreen
-  ├── [POST API] save_profile.php
-  ├── LocalStorageService.saveUserId()
-  ├── LocalStorageService.saveUserProfile()
-  ├── WorkoutGeneratorService.generateProgram()
-  └── LocalStorageService.saveWorkoutProgram()
+  ├── DatabaseService.insertUser(profile, days)
+  └── WorkoutGeneratorService.generateProgram(profile)  [önizleme için]
 
 DashboardScreen
-  ├── LocalStorageService.getSavedUserId()
-  └── [GET API] get_progress.php
+  ├── DatabaseService.savedUserId            [sync]
+  └── DatabaseService.getDashboardData(id)  [async]
+
+WorkoutScheduleScreen
+  └── DatabaseService.getScheduleData(id)
+        └── buildFilteredSchedule()          [içeride çağrılır]
+
+WorkoutSessionScreen
+  └── DatabaseService.insertSession(...)    [tamamlanınca]
 
 ProfileScreen
-  ├── LocalStorageService.getSavedProfile()
-  ├── WorkoutGeneratorService.calculateBMI()
-  └── [GET API] get_profile.php
+  ├── DatabaseService.getUser(id)
+  ├── DatabaseService.updateWeight(id, w)
+  ├── DatabaseService.updateWorkoutDays(id, days)
+  └── DatabaseService.updateGoalAndWeight(id, goal, w)
 
-ProgramResultScreen
-  └── WorkoutGeneratorService.evaluateBMI()
+HistoryScreen
+  └── DatabaseService.getHistory(id)
 ```
 
 ---
@@ -150,6 +242,6 @@ ProgramResultScreen
 ## Bağlantılar
 
 - [[02_Modeller]] — servislerle kullanılan modeller
-- [[06_API]] — HTTP isteklerinin gönderildiği yer
-- [[07_İş_Mantığı]] — program üretme kuralları detayı
+- [[06_Veritabanı]] — SQLite tablo şeması
+- [[07_İş_Mantığı]] — filtreleme ve program seçimi kuralları detayı
 - [[09_Veri_Akışı]] — servisler akış içinde nerede

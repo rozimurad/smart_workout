@@ -1,6 +1,7 @@
 ---
-tags: [iş-mantığı, bmi, program-seçimi, kurallar]
+tags: [iş-mantığı, bmi, program-seçimi, egzersiz-filtreleme, kurallar]
 created: 2026-06-11
+updated: 2026-06-11
 type: business-logic
 related: [02_Modeller, 03_Servisler, 05_Onboarding]
 ---
@@ -8,7 +9,7 @@ related: [02_Modeller, 03_Servisler, 05_Onboarding]
 # İş Mantığı
 
 > Uygulamanın temel kuralları ve hesaplama mantığı.  
-> Bu sayfa gelecekteki bir LLM için referans — "neden böyle çalışıyor" sorusunun cevabı burada.
+> Bu sayfa "neden böyle çalışıyor?" sorusunun cevabıdır.
 
 ---
 
@@ -18,32 +19,18 @@ related: [02_Modeller, 03_Servisler, 05_Onboarding]
 **Giriş:** `UserProfile.goal` + `UserProfile.gender`
 
 ```
-goal içeriyor "Kilo Ver"?
+goal içeriyor "Kilo Ver" ?
   → HIIT Fat Burn
      programAdi: "Yüksek Yoğunluklu Yağ Yakımı (HIIT)"
      haftalikGunSayisi: 4
-     hedefKategori: "Yağ Yakımı"
 
-goal içeriyor "Kas" VEYA "Hacim"?
-  gender == "Erkek"?
-    → Üst Vücut
-       programAdi: "Üst Vücut Odaklı Hipertrofi"
-       haftalikGunSayisi: 5
-       hedefKategori: "Kas Kütlesi"
-  gender == "Kadın"?
-    → Alt Vücut
-       programAdi: "Alt Vücut Odaklı Hipertrofi"
-       haftalikGunSayisi: 5
-       hedefKategori: "Kas Kütlesi"
+goal içeriyor "Kas" VEYA "Hacim" ?
+  gender == "Erkek"  → Üst Vücut Odaklı Hipertrofi   (5 gün)
+  gender == "Kadın"  → Alt Vücut Odaklı Hipertrofi    (5 gün)
 
 Diğer (Formda Kal):
-  → Full Body
-     programAdi: "Tüm Vücut (Full Body) Kondisyon"
-     haftalikGunSayisi: 3
-     hedefKategori: "Kondisyon"
+  → Tüm Vücut (Full Body) Kondisyon                   (3 gün)
 ```
-
-**Tablo:**
 
 | Hedef | Cinsiyet | Program | Gün/Hafta |
 |-------|---------|---------|-----------|
@@ -64,8 +51,8 @@ BMI = weight_kg / (height_m)²
 
 **Sınıflandırma:**
 
-| Aralık | Kategori (TR) | Renk | Hex |
-|--------|--------------|------|-----|
+| Aralık | Kategori | Renk | Hex |
+|--------|---------|------|-----|
 | < 18.5 | Zayıf | Cyan | #00E5FF |
 | 18.5 – 24.9 | Normal | Neon Yeşil | #00FF87 |
 | 25.0 – 29.9 | Fazla Kilolu | Gold | #FFD700 |
@@ -73,113 +60,167 @@ BMI = weight_kg / (height_m)²
 
 **Nerede kullanılır:**
 - `ProgramResultScreen` — onboarding sonrası önizleme
-- `DashboardScreen` — BMI kartı (API'den gelir)
+- `DashboardScreen` — BMI kartı
 - `ProfileScreen` — lokal hesaplama
+- `buildFilteredSchedule()` — obezite kontrolü (§3)
 
 ---
 
-## 3. Antrenman Günü Limitleri
+## 3. Egzersiz Filtreleme Kuralları
 
-**Seviyeye göre maksimum antrenman günü:**
+**Sorumlu:** `buildFilteredSchedule()` — `lib/data/exercise_data.dart`
 
-| Seviye | Max Gün |
-|--------|---------|
-| Yeni Başlayan | 3 |
-| Orta | 4 |
-| İleri | 5 |
-
-**Uygulama:** `WorkoutDaysStep` widget'ında checkbox disable edilir.  
-**Neden:** Aşırı antrenman (overtraining) önlemek için.
-
----
-
-## 4. Hedef Başarısı (Goal Achievement)
-
-**Kontrol yeri:** `ProfileScreen.update_weight()` sonrası  
-**Mantık:**
+### 3.1 Ortam Filtresi
 
 ```
-Kullanıcı kilo güncelledi
-  │
-  ├── goal == 'kilo_ver' AND yeni_kilo <= hedef_kilo
-  │     → 🎉 Kutlama Modal'ı göster
-  │
-  └── goal == 'kas_kazan' AND yeni_kilo >= hedef_kilo
-        → 🎉 Kutlama Modal'ı göster
-
-Kutlama Modal'ı:
-  ├── Seçenek A: "Yeni Hedef Koy"
-  │     → OnboardingScreen'e geri dön (stack temizlenir)
-  │
-  └── Seçenek B: "Formda Kal"
-        → POST /update_goal_and_weight.php
-              body: { goal: "formda_kal", weight: ... }
+environment == 'Ev'         → env: 'ev' veya 'hepsi' olan egzersizler
+environment == 'Spor Salonu'→ env: 'salon' veya 'hepsi' olan egzersizler
 ```
 
-**Animasyon:** Lottie (network URL'den) — konfeti/kutlama efekti
+### 3.2 Cinsiyet Filtresi
+
+```
+gender == 'Erkek' → gender: 'erkek' veya 'hepsi'
+gender == 'Kadın' → gender: 'kadin' veya 'hepsi'
+```
+
+**Not:** `gender: 'kadin'` olan egzersizler (Reverse Lunge, Glute Bridge, Side Step) erkeklere gösterilmez. `gender: 'erkek'` olan (Barbell Squat) kadınlara gösterilmez.
+
+### 3.3 Obezite Güvenlik Filtresi
+
+```
+BMI ≥ 30 ise → high_impact: true olan egzersizler çıkarılır
+```
+
+**Yüksek darbeli (çıkarılan) egzersizler:**
+| Egzersiz | Neden |
+|----------|-------|
+| Box Jump | Diz eklemine aşırı yük |
+| Squat Jump | Diz + kalça zorlaması |
+| Burpees | Tüm vücut yüksek darbe |
+| Jumping Jack | Eklem sağlığı riski |
+| High Knees | Yüksek hız + darbe |
+| Mountain Climber | Yüksek yoğunluk |
+
+### 3.4 Kas Grubu Rotasyonu
+
+```
+goal == 'kilo_ver':
+  → Kardio rotasyonu (full_body ↔ bacak ↔ karin)
+  → Kullanıcının hedef kas seçimi kardiyoda önemsizdir
+
+Diğer (kas_kazan, formda_kal):
+  → Sadece seçilen kaslar arasında döner
+  → targetMuscles = ['Göğüs', 'Kollar']:
+       Gün 1 = Göğüs egzersizleri
+       Gün 2 = Kollar egzersizleri
+       Gün 3 = Göğüs (döngü devam eder)
+```
+
+### 3.5 Randomizasyon
+
+Her takvim yüklemesinde `Random()` (seed'siz) ile egzersiz listesi karıştırılır.  
+→ Aynı kullanıcı için her gün farklı egzersiz kombinasyonu çıkar.
 
 ---
 
-## 5. Kimlik Doğrulama Mantığı
+## 4. Antrenman Günü Limitleri
+
+**Seviyeye göre gün başına egzersiz sayısı:**
+
+| Seviye | Egzersiz/Gün |
+|--------|-------------|
+| Yeni Başlayan | 4 |
+| Orta | 5 |
+| İleri | 6 |
+
+**`WorkoutDaysStep`'te max seçilebilir gün:** Kullanıcı onboarding'de istediği kadar gün seçebilir. Kısıtlama egzersiz sayısındadır, gün sayısında değil.
+
+---
+
+## 5. Bugünün Günü Kilidi
+
+**Mantık:** Takvim her zaman tam haftalık gösterilir.  
+Yalnızca bugün olan güne "Antrenmanı Başlat" butonu çıkar.
+
+```
+schedule → her gün tile'ı gösterilir
+
+tile.dayName == todayDayName ?
+  ├── today_state == 'workout_time' → "Antrenmanı Başlat" butonu (yeşil)
+  ├── today_state == 'already_done' → "Bugünkü Antrenman Tamamlandı" badge
+  └── (rest günü da olabilir — tile görünür ama kilitli)
+Diğer günler → 🔒 "Sadece bu gün açılabilir"
+```
+
+---
+
+## 6. Hedef Başarısı (Goal Achievement)
+
+**Kontrol yeri:** `ProfileScreen` kilo güncelleme sonrası
+
+```
+goal == 'kilo_ver'  AND yeniKilo <= hedefKilo  → 🎉 Kutlama Modal
+goal == 'kas_kazan' AND yeniKilo >= hedefKilo  → 🎉 Kutlama Modal
+
+Kutlama Modal:
+  Seçenek A: "Yeni Hedef Koy"
+    → OnboardingScreen (stack temizlenir, yeni profil)
+  Seçenek B: "Formda Kal"
+    → DatabaseService.updateGoalAndWeight(id, 'Formda Kal', yeniKilo)
+```
+
+**Animasyon:** Lottie (yerel asset: `assets/animations/celebration.json`)
+
+---
+
+## 7. Kimlik Doğrulama Mantığı
 
 ```
 main.dart başlangıcı:
-  LocalStorageService.getSavedUserId()
-    ├── null → OnboardingScreen (yeni kullanıcı)
-    └── !null → MainScreen (kayıtlı kullanıcı)
+  DatabaseService.init()
+    └── savedUserId = son users tablosundaki id (veya null)
+
+savedUserId != null → MainScreen
+savedUserId == null → OnboardingScreen
 
 Logout:
-  LocalStorageService.clearAll() → OnboardingScreen
-
-Kayıt:
-  POST /save_profile.php → user_id → SP'ye kaydet
+  DatabaseService.clearAll()
+    → users + workout_sessions silinir
+    → savedUserId = null
+    → OnboardingScreen
 ```
-
-**Önemli:** Server-side session yok. user_id kaybedilirse (uygulama silme) kullanıcı yeniden kayıt yapmalı.
 
 ---
 
-## 6. Antrenman Oturumu Mantığı
+## 8. Antrenman Oturumu Mantığı
 
 **WorkoutSessionScreen sırası:**
 
 ```
 [1] PREP PHASE (10 sn)
-    Timer.periodic(1s) → countdown
-    "Skip" → anında egzersize geç
+    countdown → "Skip" ile atlanabilir
 
 [2] EXERCISE PHASE
     Timer.periodic(1s) → süre sayacı
-    Set bitince → REST PHASE
+    "Seti Tamamla" → REST PHASE
 
-[3] REST PHASE (60 sn, ayarlanabilir)
-    Timer.periodic(1s) → countdown
-    "Skip" → anında sonraki set/egzersiz
+[3] REST PHASE (goal + level'e göre 20–90 sn)
+    countdown → "Skip" ile atlanabilir
+    Son set → sonraki egzersize geç
 
-[4] Tüm setler/egzersizler bitti → COMPLETE
-    POST /complete_workout.php
+[4] Tüm egzersizler bitti → COMPLETE
+    DatabaseService.insertSession(userId, programName, time, exercises, sets)
     Modal → "Tebrikler!" → MainScreen
 ```
 
-**Dispose:** `WorkoutSessionScreen.dispose()` tüm Timer'ları iptal eder.
-
----
-
-## 7. Takvim Günü Durumları
-
-**`get_workout.php` `today_state` alanı:**
-
-| Değer | Anlam | Kullanıcıya gösterilen |
-|-------|-------|----------------------|
-| `workout_time` | Bugün antrenman günü | Takvim + "Başlat" butonu |
-| `already_done` | Bugün zaten yapıldı | "Bugünlük Bu Kadar! 🎉" |
-| `rest` | Dinlenme günü | "Dinlenme Günü ☕" |
+**Dispose:** `dispose()` tüm Timer'ları iptal eder, memory leak önlenir.
 
 ---
 
 ## Bağlantılar
 
 - [[02_Modeller]] — kullanılan model alanları
-- [[03_Servisler]] — WorkoutGeneratorService implementasyonu
-- [[06_API]] — API endpoint request/response formatları
+- [[03_Servisler]] — servis implementasyonları
+- [[06_Veritabanı]] — SQLite tablo ve sorgu detayları
 - [[04_Ekranlar]] — kuralların uygulandığı ekranlar

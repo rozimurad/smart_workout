@@ -1,19 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import '../models/workout_exercise.dart';
-import '../services/local_storage_service.dart';
+import '../services/database_service.dart';
 import 'main_screen.dart';
 
 class WorkoutSessionScreen extends StatefulWidget {
   final List<dynamic> exercisesRaw;
-  final int programId;
+  final String programName;
 
   const WorkoutSessionScreen({
     super.key,
     required this.exercisesRaw,
-    required this.programId,
+    required this.programName,
   });
 
   @override
@@ -23,7 +21,6 @@ class WorkoutSessionScreen extends StatefulWidget {
 class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   List<WorkoutExercise> _exercises = [];
 
-  // Antrenman Durumu
   bool _isWorkoutPaused = false;
   int _elapsedSeconds = 0;
   Timer? _timer;
@@ -35,7 +32,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   bool _isPreparing = true;
   int _prepareCountdown = 10;
 
-  // Veri Toplama Değişkenleri
   int sessionTotalTime = 0;
   int _completedSets = 0;
 
@@ -104,7 +100,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     });
   }
 
-  // Dinamik özellikleri çeken yardımcılar
   int get _getCurrentMaxSets {
     if (widget.exercisesRaw.isEmpty || _currentExerciseIndex >= widget.exercisesRaw.length) return 4;
     final ex = widget.exercisesRaw[_currentExerciseIndex];
@@ -129,10 +124,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     final isLastSet = _currentSet == maxSets;
 
     if (isLastExercise && isLastSet) {
-      // Antrenmanın en son egzersizinin en son seti bittiyse dinlenme çalıştırma, doğrudan bitir!
       _finishWorkout();
     } else {
-      // Her koşulda dinlenme sayacını başlat
       setState(() {
         _isRestActive = true;
         _restSecondsRemaining = _getCurrentRestDuration;
@@ -145,11 +138,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     setState(() {
       _isRestActive = false;
       if (_isNextStepExerciseTransition) {
-        // Egzersiz geçişi yap
         _currentSet = 1;
         _currentExerciseIndex++;
       } else {
-        // Normal set geçişi yap
         _currentSet++;
       }
     });
@@ -158,7 +149,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   Future<void> _finishWorkout() async {
     _timer?.cancel();
 
-    // Kaydediliyor yükleniyor ekranı göster
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -190,21 +180,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
       },
     );
 
-    final bool success = await _sendCompleteWorkout();
+    await _saveSession();
 
     if (mounted) {
-      Navigator.of(context).pop(); // Loading dialogu kapat
-    }
-
-    if (!success) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Antrenman kaydedilirken sunucu hatası oluştu.'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
+      Navigator.of(context).pop();
     }
 
     if (mounted) {
@@ -264,8 +243,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                         ),
                       ),
                       onPressed: () {
-                        Navigator.of(context).pop(); // Dialogu kapat
-                        // Ana Ekrana yönlendir ve stack temizle
+                        Navigator.of(context).pop();
                         Navigator.of(context).pushAndRemoveUntil(
                           MaterialPageRoute(builder: (context) => const MainScreen()),
                           (route) => false,
@@ -273,10 +251,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                       },
                       child: const Text(
                         'Harika! Devam Et',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
@@ -289,37 +264,17 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     }
   }
 
-  Future<bool> _sendCompleteWorkout() async {
-    final userId = LocalStorageService.getSavedUserId();
-    if (userId == null) return false;
+  Future<void> _saveSession() async {
+    final userId = DatabaseService.savedUserId;
+    if (userId == null) return;
 
-    final payload = {
-      'user_id': int.tryParse(userId.toString()) ?? userId,
-      'program_id': widget.programId,
-      'total_time': sessionTotalTime,
-      'total_exercises': _currentExerciseIndex + 1,
-      'total_sets': _completedSets,
-    };
-
-    try {
-      final response = await http.post(
-        Uri.parse('http://192.168.1.23/api/complete_workout.php'),
-        headers: {
-          'Content-Type': 'application/json; charset=UTF-8',
-        },
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> responseData = jsonDecode(response.body);
-        if (responseData['status'] == 'success') {
-          return true;
-        }
-      }
-    } catch (e) {
-      // Ağ hatası
-    }
-    return false;
+    await DatabaseService.instance.insertSession(
+      userId: userId,
+      programName: widget.programName,
+      totalTimeSeconds: sessionTotalTime,
+      totalExercises: _currentExerciseIndex + 1,
+      totalSets: _completedSets,
+    );
   }
 
   String _formatDuration(int totalSeconds) {
@@ -348,13 +303,14 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         leading: IconButton(
           icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 24),
           onPressed: () {
-            // Antrenmanı yarıda kesmek istiyor musunuz popup'ı
             showDialog(
               context: context,
               builder: (context) => AlertDialog(
                 backgroundColor: const Color(0xFF1E293B),
-                title: const Text('Antrenmandan Çıkılsın mı?', style: TextStyle(color: Colors.white)),
-                content: const Text('Mevcut antrenman seansınız sonlandırılacak. İlerlemeniz kaydedilmeyecek.',
+                title: const Text('Antrenmandan Çıkılsın mı?',
+                    style: TextStyle(color: Colors.white)),
+                content: const Text(
+                    'Mevcut antrenman seansınız sonlandırılacak. İlerlemeniz kaydedilmeyecek.',
                     style: TextStyle(color: Colors.white70)),
                 actions: [
                   TextButton(
@@ -364,7 +320,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                   TextButton(
                     onPressed: () {
                       Navigator.of(context).pop();
-                      Navigator.of(context).pop(); // Geri git
+                      Navigator.of(context).pop();
                     },
                     child: const Text('Çıkış Yap', style: TextStyle(color: Colors.redAccent)),
                   ),
@@ -416,9 +372,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                   ),
                 );
               },
-              child: _isPreparing
-                  ? _buildPreparationPanel()
-                  : _buildActiveWorkoutPanel(),
+              child: _isPreparing ? _buildPreparationPanel() : _buildActiveWorkoutPanel(),
             ),
           ),
         ),
@@ -438,14 +392,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
           style: TextStyle(
             fontSize: 32,
             fontWeight: FontWeight.w900,
-            color: Color(0xFF00E5FF), // Electric cyan
+            color: Color(0xFF00E5FF),
             letterSpacing: 2.0,
-            shadows: [
-              Shadow(
-                color: Color(0xFF00E5FF),
-                blurRadius: 15,
-              )
-            ],
+            shadows: [Shadow(color: Color(0xFF00E5FF), blurRadius: 15)],
           ),
         ),
         const SizedBox(height: 36),
@@ -469,13 +418,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
                 fontFamily: 'monospace',
-                shadows: [
-                  Shadow(
-                    color: Colors.black38,
-                    blurRadius: 8,
-                    offset: Offset(0, 4),
-                  )
-                ],
+                shadows: [Shadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 4))],
               ),
             ),
           ],
@@ -484,30 +427,19 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         const Text(
           'SIRADAKİ EGZERSİZ',
           style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.bold,
-            color: Colors.white38,
-            letterSpacing: 1.5,
-          ),
+              fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white38, letterSpacing: 1.5),
         ),
         const SizedBox(height: 8),
         Text(
           nextExercise.name,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF00FF87), // Volt neon green
-          ),
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF00FF87)),
         ),
         const SizedBox(height: 12),
         const Text(
           'Ekipmanlarını hazırla ve pozisyonunu al.',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 13,
-            color: Colors.white54,
-          ),
+          style: TextStyle(fontSize: 13, color: Colors.white54),
         ),
         const SizedBox(height: 48),
         SizedBox(
@@ -518,20 +450,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
               backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.1),
               foregroundColor: const Color(0xFF00E5FF),
               side: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               elevation: 0,
             ),
             onPressed: _skipPreparation,
-            child: const Text(
-              'Atla',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
-              ),
-            ),
+            child: const Text('Atla',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
           ),
         ),
       ],
@@ -546,7 +470,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     return Column(
       key: const ValueKey('active_workout_panel'),
       children: [
-        // ACTIVE TOP TIMER ROW
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -556,123 +479,71 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                   height: 8,
                   width: 8,
                   decoration: const BoxDecoration(
-                    color: Color(0xFFFF3366), // Red blinking dot
+                    color: Color(0xFFFF3366),
                     shape: BoxShape.circle,
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Text(
-                  'CANLI SEANS',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFFFF3366),
-                  ),
-                ),
+                const Text('CANLI SEANS',
+                    style: TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFFF3366))),
               ],
             ),
             Text(
               _formatDuration(_elapsedSeconds),
               style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                fontFamily: 'monospace',
-              ),
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  fontFamily: 'monospace'),
             ),
           ],
         ),
         const SizedBox(height: 24),
 
-        // EXERCISE VIDEO TUTORIAL AREA
         Container(
           width: double.infinity,
-          height: 180,
+          height: 240,
           decoration: BoxDecoration(
-            color: const Color(0xFF0B0F19), // Match background obsidian
+            color: const Color(0xFF0B0F19),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.05),
-              width: 1.5,
-            ),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.05), width: 1.5),
             boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 12,
-                spreadRadius: 1,
-              )
+              BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 12, spreadRadius: 1)
             ],
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(18),
-            child: Image.network(
-              currentExercise.gifUrl,
-              headers: const {
-                'User-Agent': 'AkilliAntremanAsistani/1.0 (contact@akilliantreman.com)',
-              },
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return const Center(
-                  child: CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00FF87)), // Neon green spinner
-                  ),
-                );
-              },
-              errorBuilder: (context, error, stackTrace) {
-                return const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.image_not_supported_rounded,
-                        size: 40,
-                        color: Colors.white24,
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Görsel Yüklenemedi',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.white24,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+            child: currentExercise.imagePath.isNotEmpty
+                ? Image.asset(
+                    currentExercise.imagePath,
+                    fit: BoxFit.contain,
+                    width: double.infinity,
+                    height: double.infinity,
+                    errorBuilder: (context, error, stackTrace) => _buildImagePlaceholder(),
+                  )
+                : _buildImagePlaceholder(),
           ),
         ),
         const SizedBox(height: 24),
 
-        // CURRENT EXERCISE & PROGRESS
         Text(
           'EGZERSİZ ${_currentExerciseIndex + 1} / ${_exercises.length}',
           style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF00FF87),
-            letterSpacing: 1.0,
-          ),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF00FF87),
+              letterSpacing: 1.0),
         ),
         const SizedBox(height: 12),
         Text(
           currentExercise.name,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
         ),
         const SizedBox(height: 24),
 
         if (_isRestActive) ...[
-          // REST COUNTDOWN DISPLAY
           Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Column(
@@ -680,11 +551,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                 const Text(
                   'DİNLENME SÜRESİ',
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF6366F1), // Indigo accent
-                    letterSpacing: 1.5,
-                  ),
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF6366F1),
+                      letterSpacing: 1.5),
                 ),
                 const SizedBox(height: 16),
                 Stack(
@@ -700,14 +570,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                         valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF6366F1)),
                       ),
                     ),
-                    Text(
-                      '$_restSecondsRemaining',
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
+                    Text('$_restSecondsRemaining',
+                        style: const TextStyle(
+                            fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -716,25 +581,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                       ? 'Sıradaki Hareket: ${_exercises[_currentExerciseIndex + 1].name}'
                       : 'Sonraki Set: Set ${_currentSet + 1}',
                   style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF00FF87), // Glowing neon green
-                  ),
+                      fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF00FF87)),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Derin nefes al ve vücudunu hazırla.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white38,
-                  ),
-                ),
+                const Text('Derin nefes al ve vücudunu hazırla.',
+                    style: TextStyle(fontSize: 12, color: Colors.white38)),
               ],
             ),
           ),
           const SizedBox(height: 32),
         ] else ...[
-          // SET COUNTER
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(maxSets, (index) {
@@ -782,18 +638,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
           const SizedBox(height: 12),
           Text(
             'SET $_currentSet / $maxSets ($reps Tekrar)',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.white38,
-            ),
+            style: const TextStyle(fontSize: 13, color: Colors.white38),
           ),
           const SizedBox(height: 40),
         ],
 
-        // INTERACTIVE CONTROL BUTTONS
         Row(
           children: [
-            // PAUSE BUTTON
             Expanded(
               flex: 1,
               child: SizedBox(
@@ -801,9 +652,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                   onPressed: _togglePause,
                   child: Icon(
@@ -814,33 +663,26 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
               ),
             ),
             const SizedBox(width: 12),
-            // ACTION BUTTON
             Expanded(
               flex: 2,
               child: SizedBox(
                 height: 52,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _isRestActive ? const Color(0xFF6366F1) : const Color(0xFF00FF87),
+                    backgroundColor:
+                        _isRestActive ? const Color(0xFF6366F1) : const Color(0xFF00FF87),
                     foregroundColor: _isRestActive ? Colors.white : Colors.black,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                   onPressed: _isRestActive
                       ? _skipRest
                       : () {
-                          setState(() {
-                            _completedSets++;
-                          });
+                          setState(() => _completedSets++);
                           _nextSet();
                         },
                   child: Text(
                     _isRestActive ? 'Dinlenmeyi Atla' : 'Seti Tamamla',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -848,18 +690,30 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        // FINISH WORKOUT PREMATURELY
         TextButton(
           onPressed: _finishWorkout,
           child: const Text(
             'Antrenmanı Bitir',
-            style: TextStyle(
-              color: Color(0xFFFF3366),
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: Color(0xFFFF3366), fontWeight: FontWeight.bold),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildImagePlaceholder() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.fitness_center_rounded, size: 48, color: Colors.white24),
+          SizedBox(height: 8),
+          Text(
+            'Egzersiz Görseli',
+            style: TextStyle(fontSize: 12, color: Colors.white24, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
     );
   }
 }

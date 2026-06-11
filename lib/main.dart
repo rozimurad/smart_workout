@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/main_screen.dart';
-import 'services/local_storage_service.dart';
+import 'services/database_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await LocalStorageService.init();
+  await DatabaseService.init();
   runApp(const AkilliAntrenmanApp());
 }
 
@@ -14,7 +14,7 @@ class AkilliAntrenmanApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isUserLoggedIn = LocalStorageService.getSavedUserId() != null;
+    final bool isUserLoggedIn = DatabaseService.savedUserId != null;
 
     return MaterialApp(
       title: 'Akıllı Antrenman Asistanı',
@@ -22,11 +22,11 @@ class AkilliAntrenmanApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0B0F19), // Deep Obsidian background
+        scaffoldBackgroundColor: const Color(0xFF0B0F19),
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF00FF87), // Sporty Neon Green primary
-          secondary: Color(0xFF6366F1), // Indigo secondary
-          surface: Color(0xFF161F30), // Obsidian card surface
+          primary: Color(0xFF00FF87),
+          secondary: Color(0xFF6366F1),
+          surface: Color(0xFF161F30),
           background: Color(0xFF0B0F19),
         ),
         appBarTheme: const AppBarTheme(

@@ -1,21 +1,16 @@
 class WorkoutExercise {
   final String name;
-  final String gifUrl;
+  final String imagePath;
 
-  WorkoutExercise({
-    required this.name,
-    required this.gifUrl,
-  });
+  const WorkoutExercise({required this.name, required this.imagePath});
 
   factory WorkoutExercise.fromJson(Map<String, dynamic> json) {
     return WorkoutExercise(
-      name: json['name'] ?? json['exercise_name'] ?? json['egzersiz_adi'] ?? '',
-      gifUrl: json['gifUrl'] ?? json['gif_url'] ?? json['gorsel_url'] ?? '',
+      name: json['name'] as String? ?? 'Egzersiz',
+      imagePath: json['image_path'] as String? ?? '',
     );
   }
 
   @override
-  String toString() {
-    return 'WorkoutExercise(name: $name, gifUrl: $gifUrl)';
-  }
+  String toString() => 'WorkoutExercise(name: $name, imagePath: $imagePath)';
 }

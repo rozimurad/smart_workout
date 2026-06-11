@@ -1,7 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import '../services/local_storage_service.dart';
+import '../services/database_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -13,7 +11,7 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   bool _isLoading = true;
   String? _errorMessage;
-  List<dynamic> _historyList = [];
+  List<Map<String, dynamic>> _historyList = [];
 
   @override
   void initState() {
@@ -27,7 +25,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _errorMessage = null;
     });
 
-    final userId = LocalStorageService.getSavedUserId();
+    final userId = DatabaseService.savedUserId;
     if (userId == null) {
       setState(() {
         _isLoading = false;
@@ -36,42 +34,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
       return;
     }
 
-    try {
-      final response = await http.get(
-        Uri.parse('http://192.168.1.23/api/get_history.php?user_id=$userId'),
-      ).timeout(const Duration(seconds: 10));
+    final rows = await DatabaseService.instance.getHistory(userId);
+    if (!mounted) return;
 
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(response.body);
-        if (data['status'] == 'success') {
-          setState(() {
-            _historyList = data['history'] ?? [];
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = data['message'] ?? 'Antrenman geçmişi alınırken bir hata oluştu.';
-          });
-        }
-      } else {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Sunucu hatası: ${response.statusCode}';
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Bağlantı hatası: Sunucuya erişilemedi. Lütfen ağınızı kontrol edin.';
-      });
-    }
+    setState(() {
+      _historyList = rows;
+      _isLoading = false;
+    });
   }
 
-  // Tarih bilgisini gün/ay/yıl (DD/MM/YYYY) formatına dönüştürür
   String _formatDate(String? rawDate) {
     if (rawDate == null) return '-';
     final date = DateTime.tryParse(rawDate);
@@ -82,7 +53,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return '$day/$month/$year';
   }
 
-  // Süreyi dakikaya çevirir
   int _calculateMinutes(dynamic rawSeconds) {
     if (rawSeconds == null) return 0;
     final int seconds = int.tryParse(rawSeconds.toString()) ?? 0;
@@ -172,10 +142,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     onPressed: _fetchHistory,
                     child: const Text(
                       'Yeniden Dene',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
@@ -213,10 +180,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 24.0),
                       child: Text(
                         'Toplam ${_historyList.length} antrenman seansı tamamladın.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.blueGrey[300],
-                        ),
+                        style: TextStyle(fontSize: 13, color: Colors.blueGrey[300]),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -226,20 +190,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         itemCount: _historyList.length,
                         itemBuilder: (context, index) {
                           final item = _historyList[index];
-                          final String programName = item['program_name'] ?? 'Bilinmeyen Antrenman';
-                          final String completedAt = item['completed_at'];
-                          final int minutes = _calculateMinutes(item['total_time_spent']);
-                          final int sets = int.tryParse(item['total_sets']?.toString() ?? '0') ?? 0;
-                          final int exercises = int.tryParse(item['total_exercises']?.toString() ?? '0') ?? 0;
+                          final String programName = item['program_name'] as String? ?? 'Bilinmeyen Antrenman';
+                          final String completedAt = item['completed_at'] as String? ?? '';
+                          final int minutes = _calculateMinutes(item['total_time_seconds']);
+                          final int sets = item['total_sets'] as int? ?? 0;
+                          final int exercises = item['total_exercises'] as int? ?? 0;
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 14.0),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF161F30), // Obsidian card background
+                              color: const Color(0xFF161F30),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.03),
-                              ),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.03)),
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.black.withValues(alpha: 0.15),
@@ -252,7 +214,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
                               child: Row(
                                 children: [
-                                  // Left side circle icon
                                   Container(
                                     height: 48,
                                     width: 48,
@@ -264,15 +225,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       ),
                                     ),
                                     child: const Center(
-                                      child: Icon(
-                                        Icons.check_circle_rounded,
-                                        color: Color(0xFF00FF87),
-                                        size: 24,
-                                      ),
+                                      child: Icon(Icons.check_circle_rounded,
+                                          color: Color(0xFF00FF87), size: 24),
                                     ),
                                   ),
                                   const SizedBox(width: 14),
-                                  // Middle text
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -290,18 +247,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                         const SizedBox(height: 6),
                                         Row(
                                           children: [
-                                            const Icon(
-                                              Icons.calendar_month_outlined,
-                                              color: Colors.white38,
-                                              size: 13,
-                                            ),
+                                            const Icon(Icons.calendar_month_outlined,
+                                                color: Colors.white38, size: 13),
                                             const SizedBox(width: 6),
                                             Text(
                                               _formatDate(completedAt),
                                               style: const TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.white54,
-                                              ),
+                                                  fontSize: 12, color: Colors.white54),
                                             ),
                                           ],
                                         ),
@@ -309,25 +261,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                     ),
                                   ),
                                   const SizedBox(width: 10),
-                                  // Right side stacked badges
                                   Column(
                                     crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
                                       _buildMiniBadge(
                                         icon: Icons.timer_outlined,
-                                        color: const Color(0xFF00FF87), // Neon Green
+                                        color: const Color(0xFF00FF87),
                                         text: '$minutes dk',
                                       ),
                                       const SizedBox(height: 6),
                                       _buildMiniBadge(
                                         icon: Icons.fitness_center_outlined,
-                                        color: const Color(0xFF6366F1), // Indigo
+                                        color: const Color(0xFF6366F1),
                                         text: '$sets Set',
                                       ),
                                       const SizedBox(height: 6),
                                       _buildMiniBadge(
                                         icon: Icons.playlist_add_check_rounded,
-                                        color: const Color(0xFF00E5FF), // Cyan
+                                        color: const Color(0xFF00E5FF),
                                         text: '$exercises Egz.',
                                       ),
                                     ],
@@ -362,37 +313,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.02),
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white10,
-                  width: 1,
-                ),
+                border: Border.all(color: Colors.white10, width: 1),
               ),
               child: const Center(
-                child: Icon(
-                  Icons.history_toggle_off_rounded,
-                  color: Colors.white30,
-                  size: 48,
-                ),
+                child: Icon(Icons.history_toggle_off_rounded, color: Colors.white30, size: 48),
               ),
             ),
             const SizedBox(height: 28),
             const Text(
               'Henüz antrenman yapmadınız',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             const SizedBox(height: 12),
             Text(
               'Görünüşe göre henüz bir egzersiz seansını tamamlamadınız. Ana sayfa sekmesine giderek bugünün antrenmanına başlayın ve ilk kaydınızı oluşturun!',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13.5,
-                color: Colors.blueGrey[200],
-                height: 1.45,
-              ),
+              style: TextStyle(fontSize: 13.5, color: Colors.blueGrey[200], height: 1.45),
             ),
           ],
         ),
@@ -410,24 +346,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: color.withValues(alpha: 0.15),
-          width: 1,
-        ),
+        border: Border.all(color: color.withValues(alpha: 0.15), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: color, size: 11),
           const SizedBox(width: 4),
-          Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text(text,
+              style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
         ],
       ),
     );

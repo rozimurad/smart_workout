@@ -1,8 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:lottie/lottie.dart';
-import '../services/local_storage_service.dart';
+import '../models/user_profile.dart';
+import '../services/database_service.dart';
+import '../services/workout_generator_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -29,7 +29,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _errorMessage = null;
     });
 
-    final userId = LocalStorageService.getSavedUserId();
+    final userId = DatabaseService.savedUserId;
     if (userId == null) {
       setState(() {
         _isLoading = false;
@@ -38,64 +38,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    try {
-      final response = await http.get(
-        Uri.parse('http://192.168.1.23/api/get_profile.php?user_id=$userId'),
-      ).timeout(const Duration(seconds: 10));
+    final row = await DatabaseService.instance.getUser(userId);
+    if (!mounted) return;
 
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(response.body);
-        if (data['status'] == 'success') {
-          setState(() {
-            _profileData = data['profile'];
-            _assignedProgram = data['assigned_program'];
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = data['message'] ?? 'Profil verileri alınırken bir hata oluştu.';
-          });
-        }
-      } else {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Sunucu hatası: ${response.statusCode}';
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
+    if (row == null) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Bağlantı hatası: Sunucuya erişilemedi. Lütfen ağınızı kontrol edin.';
+        _errorMessage = 'Profil bilgileri bulunamadı.';
       });
+      return;
     }
+
+    final profile = UserProfile(
+      nickname: row['nickname'] as String?,
+      gender: row['gender'] as String?,
+      age: row['age'] as int? ?? 25,
+      height: (row['height'] as num?)?.toDouble() ?? 175.0,
+      weight: (row['weight'] as num?)?.toDouble() ?? 70.0,
+      goal: row['goal'] as String?,
+      level: row['level'] as String?,
+      environment: row['environment'] as String?,
+      targetMuscles: (row['target_muscles'] as String?)
+          ?.split(',')
+          .where((s) => s.isNotEmpty)
+          .toList(),
+      targetWeight: (row['target_weight'] as num?)?.toDouble(),
+    );
+
+    setState(() {
+      _profileData = row;
+      _assignedProgram = WorkoutGeneratorService.generateProgram(profile).programAdi;
+      _isLoading = false;
+    });
   }
 
-  // Veritabanındaki değerleri kullanıcı dostu Türkçe terimlere dönüştürür
   String _translateGoal(String? goal) {
     if (goal == null) return '-';
     final g = goal.trim().toLowerCase();
-    if (g == 'kilo_ver' || g == 'kilo ver') return 'Kilo Vermek';
-    if (g == 'kas_kazan' || g == 'kas kütlesi kazan' || g == 'kas kazan') return 'Kas Kütlesi Kazanmak';
-    if (g == 'formda_kal' || g == 'formda kal') return 'Formda Kalmak';
+    if (g == 'kilo_ver' || g == 'kilo ver' || g.contains('kilo ver')) return 'Kilo Vermek';
+    if (g == 'kas_kazan' || g.contains('kas')) return 'Kas Kütlesi Kazanmak';
+    if (g == 'formda_kal' || g.contains('formda')) return 'Formda Kalmak';
     return goal;
   }
 
   String _translateEnvironment(String? env) {
     if (env == null) return '-';
     final e = env.trim().toLowerCase();
-    if (e == 'ev') return 'Evde Egzersiz';
-    if (e == 'salon' || e == 'spor salonu') return 'Spor Salonu';
+    if (e == 'ev' || e.contains('ev')) return 'Evde Egzersiz';
+    if (e == 'salon' || e.contains('salon')) return 'Spor Salonu';
     return env;
   }
 
   String _translateLevel(String? level) {
     if (level == null) return '-';
     final l = level.trim().toLowerCase();
-    if (l == 'baslangic' || l == 'yeni başlayan' || l == 'yeni baslayan') return 'Yeni Başlayan';
+    if (l.contains('yeni') || l.contains('başlayan')) return 'Yeni Başlayan';
     if (l == 'orta') return 'Orta Seviye';
     if (l == 'ileri') return 'İleri Seviye';
     return level;
@@ -144,30 +141,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: const Color(0xFFFF3366).withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.error_outline_rounded,
-                    color: Color(0xFFFF3366),
-                    size: 48,
-                  ),
+                  child: const Icon(Icons.error_outline_rounded,
+                      color: Color(0xFFFF3366), size: 48),
                 ),
                 const SizedBox(height: 24),
                 const Text(
                   'Profil Yüklenemedi',
                   style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
+                      fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
                 const SizedBox(height: 12),
                 Text(
                   _errorMessage!,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.white70,
-                    height: 1.45,
-                  ),
+                  style: const TextStyle(fontSize: 14, color: Colors.white70, height: 1.45),
                 ),
                 const SizedBox(height: 32),
                 SizedBox(
@@ -177,18 +164,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF00FF87),
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     onPressed: _fetchProfile,
-                    child: const Text(
-                      'Yeniden Dene',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: const Text('Yeniden Dene',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -199,10 +179,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final profile = _profileData ?? {};
-    final String name = profile['name'] ?? 'Atlet';
-    final int age = int.tryParse(profile['age']?.toString() ?? '25') ?? 25;
-    final double weight = double.tryParse(profile['weight']?.toString() ?? '70') ?? 70.0;
-    final double height = double.tryParse(profile['height']?.toString() ?? '175') ?? 175.0;
+    final String name = profile['nickname'] as String? ?? 'Atlet';
+    final int age = profile['age'] as int? ?? 25;
+    final double weight = (profile['weight'] as num?)?.toDouble() ?? 70.0;
+    final double height = (profile['height'] as num?)?.toDouble() ?? 175.0;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B0F19),
@@ -213,7 +193,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 10),
-              // PROFILE HEADER
               Row(
                 children: [
                   Container(
@@ -252,19 +231,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Text(
                         name,
                         style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                            fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                       const SizedBox(height: 4),
                       const Text(
                         'Premium Atlet',
                         style: TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF00FF87),
-                          fontWeight: FontWeight.w600,
-                        ),
+                            fontSize: 13,
+                            color: Color(0xFF00FF87),
+                            fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
@@ -272,15 +247,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 28),
 
-              // ACTIVE PROGRAM CARD (GRADIENT)
               const Text(
                 'Aktif Programın',
                 style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white70,
-                  letterSpacing: 0.5,
-                ),
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white70,
+                    letterSpacing: 0.5),
               ),
               const SizedBox(height: 12),
               Container(
@@ -294,15 +267,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
-                    color: const Color(0xFF6366F1).withValues(alpha: 0.15),
-                    width: 2.0,
-                  ),
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.15), width: 2.0),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF6366F1).withValues(alpha: 0.08),
-                      blurRadius: 20,
-                      spreadRadius: 2,
-                    )
+                        color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                        blurRadius: 20,
+                        spreadRadius: 2)
                   ],
                 ),
                 child: Column(
@@ -316,21 +286,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             color: const Color(0xFF6366F1).withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(
-                            Icons.fitness_center_rounded,
-                            color: Color(0xFF818CF8),
-                            size: 20,
-                          ),
+                          child: const Icon(Icons.fitness_center_rounded,
+                              color: Color(0xFF818CF8), size: 20),
                         ),
                         const SizedBox(width: 12),
                         const Text(
                           'Kişisel Antrenman Planın',
                           style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF818CF8),
-                            letterSpacing: 0.5,
-                          ),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF818CF8),
+                              letterSpacing: 0.5),
                         ),
                       ],
                     ),
@@ -338,35 +304,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Text(
                       _assignedProgram ?? 'Kişiselleştirilmiş Program',
                       style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        height: 1.3,
-                      ),
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          height: 1.3),
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'Bu program, fiziksel ölçümlerinize ve kişisel antrenman hedeflerinize en uygun şekilde yapay zeka asistanınız tarafından optimize edilmiştir.',
+                      'Bu program, fiziksel ölçümlerinize ve kişisel antrenman hedeflerinize en uygun şekilde optimize edilmiştir.',
                       style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.blueGrey[200],
-                        height: 1.45,
-                      ),
+                          fontSize: 13, color: Colors.blueGrey[200], height: 1.45),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 32),
 
-              // PHYSICAL & ONBOARDING DATA GRID
               const Text(
                 'Fiziksel Ölçümlerin ve Hedefin',
                 style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white70,
-                  letterSpacing: 0.5,
-                ),
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white70,
+                    letterSpacing: 0.5),
               ),
               const SizedBox(height: 16),
               GridView.count(
@@ -379,37 +339,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   _buildMetricTile(
                     icon: Icons.straighten_rounded,
-                    iconColor: const Color(0xFF00FF87), // Neon Green
+                    iconColor: const Color(0xFF00FF87),
                     label: 'Boy',
                     value: '${height.toStringAsFixed(0)} cm',
                   ),
                   _buildMetricTile(
                     icon: Icons.fitness_center_rounded,
-                    iconColor: const Color(0xFF6366F1), // Indigo
+                    iconColor: const Color(0xFF6366F1),
                     label: 'Kilo',
                     value: '${weight.toStringAsFixed(0)} kg',
                   ),
                   _buildMetricTile(
                     icon: Icons.cake_rounded,
-                    iconColor: const Color(0xFF00E5FF), // Cyan
+                    iconColor: const Color(0xFF00E5FF),
                     label: 'Yaş',
                     value: '$age Yaş',
                   ),
                   _buildMetricTile(
                     icon: Icons.emoji_events_rounded,
-                    iconColor: const Color(0xFFFFD700), // Gold
+                    iconColor: const Color(0xFFFFD700),
                     label: 'Amacı',
                     value: _translateGoal(profile['goal']?.toString()),
                   ),
                   _buildMetricTile(
                     icon: Icons.leaderboard_rounded,
-                    iconColor: const Color(0xFFFF9800), // Orange
+                    iconColor: const Color(0xFFFF9800),
                     label: 'Seviyesi',
                     value: _translateLevel(profile['level']?.toString()),
                   ),
                   _buildMetricTile(
                     icon: Icons.roofing_rounded,
-                    iconColor: const Color(0xFF4CAF50), // Green
+                    iconColor: const Color(0xFF4CAF50),
                     label: 'Seçtiği Ortam',
                     value: _translateEnvironment(profile['environment']?.toString()),
                   ),
@@ -417,7 +377,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 32),
 
-              // EDIT WORKOUT DAYS BUTTON
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -431,38 +390,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF00FF87).withValues(alpha: 0.15),
-                        blurRadius: 12,
-                        spreadRadius: 1,
-                      )
+                          color: const Color(0xFF00FF87).withValues(alpha: 0.15),
+                          blurRadius: 12,
+                          spreadRadius: 1)
                     ],
                   ),
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
                     onPressed: () => _showEditWorkoutDaysBottomSheet(context, profile),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.calendar_month_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
+                        Icon(Icons.calendar_month_rounded, color: Colors.white, size: 20),
                         SizedBox(width: 10),
                         Text(
                           'Antrenman Günlerimi Değiştir',
                           style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5),
                         ),
                       ],
                     ),
@@ -470,7 +421,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              // UPDATE WEIGHT BUTTON
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -484,38 +434,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF00FF87).withValues(alpha: 0.15),
-                        blurRadius: 12,
-                        spreadRadius: 1,
-                      )
+                          color: const Color(0xFF00FF87).withValues(alpha: 0.15),
+                          blurRadius: 12,
+                          spreadRadius: 1)
                     ],
                   ),
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
                     onPressed: () => _showUpdateWeightBottomSheet(context, profile),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.monitor_weight_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
+                        Icon(Icons.monitor_weight_rounded, color: Colors.white, size: 20),
                         SizedBox(width: 10),
                         Text(
                           'Güncel Kilo Gir',
                           style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5),
                         ),
                       ],
                     ),
@@ -546,9 +488,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       levelName = 'Yeni Başlayan';
     }
 
-    final String daysStr = profile['workout_days'] ?? '';
+    final String daysStr = profile['workout_days'] as String? ?? '';
     List<String> currentSelectedDays = daysStr.isNotEmpty
-        ? daysStr.split(',').map((d) => d.trim()).toList()
+        ? daysStr.split(',').map((d) => d.trim()).where((d) => d.isNotEmpty).toList()
         : [];
 
     showModalBottomSheet(
@@ -556,14 +498,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: const Color(0xFF0B0F19),
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (BuildContext bottomSheetContext) {
         List<String> tempSelectedDays = List<String>.from(currentSelectedDays);
         bool isSaving = false;
 
         return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
+          builder: (BuildContext ctx, StateSetter setModalState) {
             final bool isLimitReached = tempSelectedDays.length >= maxDays;
 
             void toggleDay(String day) {
@@ -572,28 +513,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   tempSelectedDays.remove(day);
                 } else {
                   if (tempSelectedDays.length >= maxDays) {
-                    ScaffoldMessenger.of(context).clearSnackBars();
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    ScaffoldMessenger.of(ctx).clearSnackBars();
+                    ScaffoldMessenger.of(ctx).showSnackBar(
                       SnackBar(
                         content: Row(
                           children: [
-                            const Icon(Icons.warning_amber_rounded, color: Colors.black, size: 22),
+                            const Icon(Icons.warning_amber_rounded,
+                                color: Colors.black, size: 22),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                'Seviyene göre maksimum gün sınırına ulaştın! ($levelName: en fazla $maxDays gün)',
+                                '$levelName: en fazla $maxDays gün seçebilirsin',
                                 style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black,
-                                  fontSize: 13,
-                                ),
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black,
+                                    fontSize: 13),
                               ),
                             ),
                           ],
                         ),
                         backgroundColor: const Color(0xFF00FF87),
                         behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
                         margin: const EdgeInsets.all(16),
                         duration: const Duration(seconds: 3),
                       ),
@@ -607,105 +549,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             Future<void> saveDays() async {
               if (tempSelectedDays.isEmpty) return;
+              setModalState(() => isSaving = true);
 
-              setModalState(() {
-                isSaving = true;
-              });
-
-              final userId = LocalStorageService.getSavedUserId();
+              final userId = DatabaseService.savedUserId;
               if (userId == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Hata: Kullanıcı ID bulunamadı!'),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                setModalState(() {
-                  isSaving = false;
-                });
+                setModalState(() => isSaving = false);
                 return;
               }
 
-              final payload = {
-                'user_id': userId.toString(),
-                'workout_days': tempSelectedDays.join(','),
-              };
+              await DatabaseService.instance.updateWorkoutDays(userId, tempSelectedDays);
 
-              try {
-                final response = await http.post(
-                  Uri.parse('http://192.168.1.23/api/update_workout_days.php'),
-                  headers: {
-                    'Content-Type': 'application/json; charset=UTF-8',
-                  },
-                  body: jsonEncode(payload),
-                ).timeout(const Duration(seconds: 10));
-
-                if (!context.mounted) return;
-
-                if (response.statusCode == 200) {
-                  final data = jsonDecode(response.body);
-                  if (data['status'] == 'success') {
-                    // Close the bottom sheet
-                    Navigator.pop(bottomSheetContext);
-
-                    // Show success snackbar
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Row(
-                          children: [
-                            const Icon(Icons.check_circle_outline_rounded, color: Colors.black, size: 22),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                data['message'] ?? 'Antrenman günleri başarıyla güncellendi.',
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
-                              ),
-                            ),
-                          ],
+              if (!ctx.mounted) return;
+              Navigator.pop(bottomSheetContext);
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(
+                  content: const Row(
+                    children: [
+                      Icon(Icons.check_circle_outline_rounded, color: Colors.black, size: 22),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Antrenman günleri başarıyla güncellendi.',
+                          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
                         ),
-                        backgroundColor: const Color(0xFF00FF87),
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        margin: const EdgeInsets.all(16),
                       ),
-                    );
-
-                    // Refresh profile
-                    _fetchProfile();
-                  } else {
-                    setModalState(() {
-                      isSaving = false;
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(data['message'] ?? 'Güncelleme başarısız oldu.'),
-                        backgroundColor: Colors.redAccent,
-                      ),
-                    );
-                  }
-                } else {
-                  setModalState(() {
-                    isSaving = false;
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Sunucu hatası: ${response.statusCode}'),
-                      backgroundColor: Colors.redAccent,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (!context.mounted) return;
-                setModalState(() {
-                  isSaving = false;
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Bağlantı hatası: Sunucuya erişilemedi.'),
-                    backgroundColor: Colors.redAccent,
+                    ],
                   ),
-                );
-              }
+                  backgroundColor: const Color(0xFF00FF87),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  margin: const EdgeInsets.all(16),
+                ),
+              );
+              _fetchProfile();
             }
 
             return Padding(
@@ -713,13 +589,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 top: 24,
                 left: 24,
                 right: 24,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Pull line decoration
                   Center(
                     child: Container(
                       width: 48,
@@ -734,26 +609,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const Text(
                     'Antrenman Günlerini Düzenle',
                     style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
+                        fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Seviyen: $levelName (En fazla $maxDays gün seçebilirsin)',
                     style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.blueGrey[200],
-                      fontWeight: FontWeight.w500,
-                    ),
+                        fontSize: 14, color: Colors.blueGrey[200], fontWeight: FontWeight.w500),
                   ),
                   const SizedBox(height: 20),
-                  // Days list
                   ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.45,
-                    ),
+                        maxHeight: MediaQuery.of(ctx).size.height * 0.45),
                     child: ListView.builder(
                       shrinkWrap: true,
                       itemCount: 7,
@@ -768,7 +635,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           'Pazar'
                         ][index];
                         final bool isSelected = tempSelectedDays.contains(day);
-                        final bool isUnselectedAndDisabled = isLimitReached && !isSelected;
+                        final bool isDisabled = isLimitReached && !isSelected;
 
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8.0),
@@ -779,10 +646,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               borderRadius: BorderRadius.circular(14),
                               child: AnimatedOpacity(
                                 duration: const Duration(milliseconds: 200),
-                                opacity: isUnselectedAndDisabled ? 0.45 : 1.0,
+                                opacity: isDisabled ? 0.45 : 1.0,
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 200),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16.0, vertical: 12.0),
                                   decoration: BoxDecoration(
                                     color: isSelected
                                         ? const Color(0xFF00FF87).withValues(alpha: 0.05)
@@ -807,16 +675,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                               : Colors.white.withValues(alpha: 0.03),
                                           shape: BoxShape.circle,
                                           border: Border.all(
-                                            color: isSelected ? const Color(0xFF00FF87) : Colors.white24,
+                                            color: isSelected
+                                                ? const Color(0xFF00FF87)
+                                                : Colors.white24,
                                             width: 1.5,
                                           ),
                                         ),
                                         child: isSelected
-                                            ? const Icon(
-                                                Icons.check_rounded,
-                                                color: Colors.black,
-                                                size: 14,
-                                              )
+                                            ? const Icon(Icons.check_rounded,
+                                                color: Colors.black, size: 14)
                                             : null,
                                       ),
                                       const SizedBox(width: 14),
@@ -824,8 +691,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         day,
                                         style: TextStyle(
                                           fontSize: 15,
-                                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                          color: isSelected ? Colors.white : Colors.white70,
+                                          fontWeight: isSelected
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          color:
+                                              isSelected ? Colors.white : Colors.white70,
                                         ),
                                       ),
                                       const Spacer(),
@@ -833,10 +703,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         const Text(
                                           'Seçili',
                                           style: TextStyle(
-                                            fontSize: 11,
-                                            color: Color(0xFF00FF87),
-                                            fontWeight: FontWeight.bold,
-                                          ),
+                                              fontSize: 11,
+                                              color: Color(0xFF00FF87),
+                                              fontWeight: FontWeight.bold),
                                         ),
                                     ],
                                   ),
@@ -849,7 +718,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  // Action buttons
                   Row(
                     children: [
                       Expanded(
@@ -859,14 +727,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             style: TextButton.styleFrom(
                               foregroundColor: Colors.white70,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
+                                  borderRadius: BorderRadius.circular(14)),
                             ),
                             onPressed: () => Navigator.pop(bottomSheetContext),
-                            child: const Text(
-                              'Vazgeç',
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                            ),
+                            child: const Text('Vazgeç',
+                                style: TextStyle(
+                                    fontSize: 15, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ),
@@ -879,29 +745,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               backgroundColor: tempSelectedDays.isNotEmpty
                                   ? const Color(0xFF00FF87)
                                   : const Color(0xFF1E293B),
-                              foregroundColor: tempSelectedDays.isNotEmpty ? Colors.black : Colors.white24,
+                              foregroundColor: tempSelectedDays.isNotEmpty
+                                  ? Colors.black
+                                  : Colors.white24,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
+                                  borderRadius: BorderRadius.circular(14)),
                               elevation: tempSelectedDays.isNotEmpty ? 4 : 0,
                               shadowColor: tempSelectedDays.isNotEmpty
                                   ? const Color(0xFF00FF87).withValues(alpha: 0.3)
                                   : Colors.transparent,
                             ),
-                            onPressed: (tempSelectedDays.isNotEmpty && !isSaving) ? saveDays : null,
+                            onPressed: (tempSelectedDays.isNotEmpty && !isSaving)
+                                ? saveDays
+                                : null,
                             child: isSaving
                                 ? const SizedBox(
                                     height: 20,
                                     width: 20,
                                     child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
-                                    ),
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                            Colors.black)),
                                   )
-                                : const Text(
-                                    'Kaydet',
-                                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                                  ),
+                                : const Text('Kaydet',
+                                    style: TextStyle(
+                                        fontSize: 15, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ),
@@ -925,11 +793,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF161F30), // Obsidian card surface
+        color: const Color(0xFF161F30),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.03),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.03)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -944,20 +810,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   color: iconColor.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
-                  icon,
-                  color: iconColor,
-                  size: 18,
-                ),
+                child: Icon(icon, color: iconColor, size: 18),
               ),
               Text(
                 label,
                 style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.white38,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.2,
-                ),
+                    fontSize: 11,
+                    color: Colors.white38,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.2),
               ),
             ],
           ),
@@ -970,11 +831,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: -0.2,
-                ),
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    letterSpacing: -0.2),
               ),
             ),
           ),
@@ -984,60 +844,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showUpdateWeightBottomSheet(BuildContext context, Map<String, dynamic> profile) {
-    double currentWeight = double.tryParse(profile['weight']?.toString() ?? '70') ?? 70.0;
+    double currentWeight = (profile['weight'] as num?)?.toDouble() ?? 70.0;
 
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0B0F19),
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (BuildContext bottomSheetContext) {
         bool isSaving = false;
         double tempWeight = currentWeight;
 
         return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
+          builder: (BuildContext ctx, StateSetter setModalState) {
             Future<void> saveWeight() async {
-              setModalState(() {
-                isSaving = true;
-              });
+              setModalState(() => isSaving = true);
 
-              final userId = LocalStorageService.getSavedUserId();
-              if (userId == null) return;
-
-              final payload = {
-                'user_id': userId.toString(),
-                'weight': tempWeight.toString(),
-              };
-
-              try {
-                final response = await http.post(
-                  Uri.parse('http://192.168.1.23/api/update_weight.php'),
-                  headers: {'Content-Type': 'application/json; charset=UTF-8'},
-                  body: jsonEncode(payload),
-                ).timeout(const Duration(seconds: 10));
-
-                if (!context.mounted) return;
-
-                if (response.statusCode == 200) {
-                  final data = jsonDecode(response.body);
-                  if (data['status'] == 'success') {
-                    Navigator.pop(bottomSheetContext);
-                    _fetchProfile();
-                    _checkGoalSuccess(context, profile, tempWeight);
-                  }
-                }
-              } catch (e) {
-                // Ignore error for now
-              } finally {
-                if (context.mounted) {
-                  setModalState(() {
-                    isSaving = false;
-                  });
-                }
+              final userId = DatabaseService.savedUserId;
+              if (userId == null) {
+                setModalState(() => isSaving = false);
+                return;
               }
+
+              await DatabaseService.instance.updateWeight(userId, tempWeight);
+
+              if (!ctx.mounted) return;
+              Navigator.pop(bottomSheetContext);
+              _checkGoalSuccess(ctx, profile, tempWeight);
+              _fetchProfile();
             }
 
             return Padding(
@@ -1045,7 +880,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 top: 24,
                 left: 24,
                 right: 24,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1065,35 +900,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const Text(
                     'Güncel Kilonu Gir',
                     style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
+                        fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                   const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Kilo',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.white70,
-                        ),
-                      ),
+                      const Text('Kilo',
+                          style: TextStyle(fontSize: 16, color: Colors.white70)),
                       Text(
                         '${tempWeight.toStringAsFixed(1)} kg',
                         style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF00FF87),
-                        ),
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF00FF87)),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
                   SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
+                    data: SliderTheme.of(ctx).copyWith(
                       activeTrackColor: const Color(0xFF00FF87),
                       inactiveTrackColor: Colors.white.withValues(alpha: 0.08),
                       thumbColor: const Color(0xFF00FF87),
@@ -1103,11 +929,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       min: 30,
                       max: 200,
                       divisions: 1700,
-                      onChanged: (val) {
-                        setModalState(() {
-                          tempWeight = val;
-                        });
-                      },
+                      onChanged: (val) => setModalState(() => tempWeight = val),
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -1119,16 +941,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         backgroundColor: const Color(0xFF00FF87),
                         foregroundColor: Colors.black,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+                            borderRadius: BorderRadius.circular(14)),
                       ),
                       onPressed: isSaving ? null : saveWeight,
                       child: isSaving
                           ? const CircularProgressIndicator(color: Colors.black)
-                          : const Text(
-                              'Kaydet',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
+                          : const Text('Kaydet',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],
@@ -1142,16 +962,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _checkGoalSuccess(BuildContext context, Map<String, dynamic> profile, double newWeight) {
     final goal = profile['goal']?.toString().trim().toLowerCase() ?? '';
-    final targetWeightStr = profile['target_weight']?.toString();
-    if (targetWeightStr == null) return;
-    
-    final targetWeight = double.tryParse(targetWeightStr);
+    final targetWeight = (profile['target_weight'] as num?)?.toDouble();
     if (targetWeight == null) return;
 
     bool isSuccess = false;
-    if (goal == 'kilo_ver' || goal == 'kilo ver') {
+    if (goal.contains('kilo ver')) {
       if (newWeight <= targetWeight) isSuccess = true;
-    } else if (goal == 'kas_kazan' || goal == 'kas kütlesi kazan' || goal == 'kas kazan') {
+    } else if (goal.contains('kas')) {
       if (newWeight >= targetWeight) isSuccess = true;
     }
 
@@ -1167,36 +984,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
       isScrollControlled: true,
       isDismissible: false,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
       builder: (BuildContext bottomSheetContext) {
         bool isProcessing = false;
 
         return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            
+          builder: (BuildContext ctx, StateSetter setModalState) {
             Future<void> maintainForm() async {
               setModalState(() => isProcessing = true);
-              final userId = LocalStorageService.getSavedUserId();
+
+              final userId = DatabaseService.savedUserId;
               if (userId != null) {
-                final payload = {
-                  'user_id': userId.toString(),
-                  'goal': 'formda_kal',
-                  'target_weight': newWeight.toString(),
-                };
-                try {
-                  await http.post(
-                    Uri.parse('http://192.168.1.23/api/update_goal_and_weight.php'),
-                    headers: {'Content-Type': 'application/json; charset=UTF-8'},
-                    body: jsonEncode(payload),
-                  ).timeout(const Duration(seconds: 10));
-                } catch (e) {
-                  // Ignore
-                }
+                await DatabaseService.instance
+                    .updateGoalAndWeight(userId, 'Formda Kal', newWeight);
               }
-              if (!context.mounted) return;
+
+              if (!ctx.mounted) return;
               Navigator.pop(bottomSheetContext);
-              _fetchProfile(); // refresh main page
+              _fetchProfile();
             }
 
             return Container(
@@ -1206,8 +1011,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   SizedBox(
                     height: 200,
-                    child: Lottie.network(
-                      'https://assets10.lottiefiles.com/packages/lf20_U108Wn.json',
+                    child: Lottie.asset(
+                      'assets/animations/celebration.json',
                       repeat: true,
                       errorBuilder: (context, error, stackTrace) => const Icon(
                         Icons.emoji_events_rounded,
@@ -1220,20 +1025,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const Text(
                     'Tebrikler!',
                     style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
+                        fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                   const SizedBox(height: 12),
                   const Text(
                     'Biyolojik hedefine ulaştın. İstediğin vücut kitle indeksine başarıyla ulaştın.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.white70,
-                      height: 1.5,
-                    ),
+                    style: TextStyle(fontSize: 16, color: Colors.white70, height: 1.5),
                   ),
                   const SizedBox(height: 40),
                   SizedBox(
@@ -1244,17 +1042,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         backgroundColor: const Color(0xFF00FF87),
                         foregroundColor: Colors.black,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+                            borderRadius: BorderRadius.circular(14)),
                       ),
-                      onPressed: isProcessing ? null : () {
-                        Navigator.pop(bottomSheetContext);
-                        Navigator.pushReplacementNamed(context, '/'); // Yeni Hedef (Onboarding)
-                      },
-                      child: const Text(
-                        'Yeni Hedef Belirle',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
+                      onPressed: isProcessing
+                          ? null
+                          : () {
+                              Navigator.pop(bottomSheetContext);
+                              Navigator.pushReplacementNamed(ctx, '/');
+                            },
+                      child: const Text('Yeni Hedef Belirle',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -1270,12 +1067,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                       onPressed: isProcessing ? null : maintainForm,
-                      child: isProcessing 
-                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Text(
-                              'Bu Formu Koru',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
+                      child: isProcessing
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Text('Bu Formu Koru',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ),
                   const SizedBox(height: 16),

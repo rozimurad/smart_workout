@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
 import '../models/workout_program.dart';
 import '../services/workout_generator_service.dart';
-import '../services/local_storage_service.dart';
 import 'main_screen.dart';
 
 class ProgramResultScreen extends StatefulWidget {
@@ -26,13 +25,8 @@ class _ProgramResultScreenState extends State<ProgramResultScreen> {
     });
 
     try {
-      // Yerel hafızaya profil ve antrenman bilgilerini kaydediyoruz
-      await LocalStorageService.saveUserProfile(widget.profile);
-      await LocalStorageService.saveWorkoutProgram(program);
-
       if (!mounted) return;
 
-      // Kayıt başarılı popup dialogu göster
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -116,13 +110,6 @@ class _ProgramResultScreenState extends State<ProgramResultScreen> {
             ),
           );
         },
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Kayıt sırasında hata oluştu: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
       );
     } finally {
       if (mounted) {

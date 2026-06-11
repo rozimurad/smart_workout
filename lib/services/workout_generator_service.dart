@@ -39,6 +39,17 @@ class WorkoutGeneratorService {
     }
   }
 
+  // Profil verilerine göre program tipi anahtarını döner
+  static String getProgramTypeKey(UserProfile profile) {
+    final String goal = profile.goal ?? '';
+    final String gender = profile.gender ?? '';
+    if (goal.contains('Kilo Ver')) return 'hiit';
+    if (goal.contains('Kas') || goal.contains('Hacim')) {
+      return gender == 'Erkek' ? 'upper_body' : 'lower_body';
+    }
+    return 'full_body';
+  }
+
   // Profil verilerine göre en uygun antrenman şablonunu oluşturur
   static WorkoutProgram generateProgram(UserProfile profile) {
     final String goal = profile.goal ?? '';

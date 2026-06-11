@@ -1,7 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import '../services/local_storage_service.dart';
+import '../services/database_service.dart';
 import 'workout_session_screen.dart';
 
 class WorkoutScheduleScreen extends StatefulWidget {
@@ -15,10 +13,10 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   Map<String, dynamic> _schedule = {};
-  int _programId = 1;
   String _programTitle = '';
   String? _todayState;
   String? _statusMessage;
+  String? _todayDayName;
 
   @override
   void initState() {
@@ -32,7 +30,7 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
       _errorMessage = null;
     });
 
-    final userId = LocalStorageService.getSavedUserId();
+    final userId = DatabaseService.savedUserId;
     if (userId == null) {
       setState(() {
         _isLoading = false;
@@ -41,45 +39,20 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
       return;
     }
 
-    try {
-      final response = await http.get(
-        Uri.parse('http://192.168.1.23/api/get_workout.php?user_id=$userId'),
-      ).timeout(const Duration(seconds: 10));
+    final data = await DatabaseService.instance.getScheduleData(userId);
+    if (!mounted) return;
 
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(response.body);
-        if (data['status'] != 'error') {
-          setState(() {
-            _todayState = data['today_state'];
-            _statusMessage = data['message'];
-            if (_todayState == 'workout_time') {
-              _schedule = Map<String, dynamic>.from(data['schedule'] ?? {});
-              _programId = int.tryParse(data['program_id']?.toString() ?? '') ?? 999;
-              _programTitle = data['program_title'] ?? 'Kişiselleştirilmiş Programım';
-            }
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = data['message'] ?? 'Antrenman takvimi yüklenirken hata oluştu.';
-          });
-        }
-      } else {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Sunucu hatası: ${response.statusCode}';
-        });
+    setState(() {
+      _todayState = data['today_state'] as String?;
+      _statusMessage = data['message'] as String?;
+      _programTitle = data['program_title'] as String? ?? 'Kişiselleştirilmiş Programım';
+      _todayDayName = data['today_day_name'] as String?;
+      final raw = data['schedule'];
+      if (raw is Map) {
+        _schedule = Map<String, dynamic>.from(raw);
       }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Bağlantı hatası: Sunucuya erişilemedi. Lütfen ağınızı kontrol edin.';
-      });
-    }
+      _isLoading = false;
+    });
   }
 
   @override
@@ -133,30 +106,18 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
                     color: const Color(0xFFFF3366).withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.error_outline_rounded,
-                    color: Color(0xFFFF3366),
-                    size: 48,
-                  ),
+                  child: const Icon(Icons.error_outline_rounded,
+                      color: Color(0xFFFF3366), size: 48),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'Hata Oluştu',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
+                const Text('Hata Oluştu',
+                    style: TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                 const SizedBox(height: 12),
                 Text(
                   _errorMessage!,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.white70,
-                    height: 1.45,
-                  ),
+                  style: const TextStyle(fontSize: 14, color: Colors.white70, height: 1.45),
                 ),
                 const SizedBox(height: 32),
                 SizedBox(
@@ -166,18 +127,11 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF00FF87),
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     onPressed: _fetchSchedule,
-                    child: const Text(
-                      'Yeniden Dene',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: const Text('Yeniden Dene',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -187,15 +141,12 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
       );
     }
 
-    // Sıralı gün anahtarları
     final List<String> sortedDayKeys = _schedule.keys.toList()
       ..sort((a, b) {
         final intNumA = int.tryParse(a.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
         final intNumB = int.tryParse(b.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
         return intNumA.compareTo(intNumB);
       });
-
-    final bool showProgramHeader = _todayState == 'workout_time' && _programTitle.isNotEmpty;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B0F19),
@@ -208,11 +159,7 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
         ),
         title: const Text(
           'Antrenman Takvimi',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
         ),
         centerTitle: true,
       ),
@@ -220,10 +167,17 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top program indicator
-            if (showProgramHeader)
+            // Status banner
+            if (_statusMessage != null)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: _buildStatusBanner(),
+              ),
+
+            // Program title
+            if (_programTitle.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
                 child: Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
@@ -231,8 +185,7 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
                     color: const Color(0xFF161F30),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: const Color(0xFF6366F1).withValues(alpha: 0.1),
-                    ),
+                        color: const Color(0xFF6366F1).withValues(alpha: 0.1)),
                   ),
                   child: Row(
                     children: [
@@ -242,23 +195,28 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
                           color: const Color(0xFF6366F1).withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.stars_rounded, color: Color(0xFF818CF8), size: 20),
+                        child: const Icon(Icons.stars_rounded,
+                            color: Color(0xFF818CF8), size: 20),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Aktif Programın',
-                              style: TextStyle(fontSize: 11, color: Colors.white38, fontWeight: FontWeight.bold),
-                            ),
+                            const Text('Aktif Programın',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white38,
+                                    fontWeight: FontWeight.bold)),
                             const SizedBox(height: 2),
                             Text(
                               _programTitle,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
@@ -268,329 +226,322 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
                 ),
               ),
 
-            // Scrollable day list OR lockout screens
+            const SizedBox(height: 12),
+
             Expanded(
-              child: _todayState == 'already_done'
-                  ? _buildAlreadyDoneState()
-                  : _todayState == 'rest'
-                      ? _buildRestState()
-                      : sortedDayKeys.isEmpty
-                          ? _buildEmptyState()
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-                              itemCount: sortedDayKeys.length,
-                              itemBuilder: (context, index) {
-                                final String dayKey = sortedDayKeys[index];
-                                final List<dynamic> dayExercises = _schedule[dayKey] ?? [];
+              child: sortedDayKeys.isEmpty
+                  ? _buildEmptyState()
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
+                      itemCount: sortedDayKeys.length,
+                      itemBuilder: (context, index) {
+                        final String dayKey = sortedDayKeys[index];
+                        final List<dynamic> dayExercises =
+                            (_schedule[dayKey] as List?) ?? [];
 
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 16),
-                                  decoration: BoxDecoration(
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.2),
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 4),
-                                      )
-                                    ],
-                                  ),
-                                  child: Theme(
-                                    data: Theme.of(context).copyWith(
-                                      dividerColor: Colors.transparent,
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(20),
-                                      child: ExpansionTile(
-                                        collapsedBackgroundColor: const Color(0xFF161F30),
-                                        backgroundColor: const Color(0xFF1E293B),
-                                        iconColor: const Color(0xFF00FF87),
-                                        collapsedIconColor: Colors.white70,
-                                        title: Text(
-                                          dayKey,
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        subtitle: Text(
-                                          '${dayExercises.length} Egzersiz',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.blueGrey[300],
-                                          ),
-                                        ),
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20, top: 8),
-                                            color: const Color(0xFF1E293B),
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                // Divider line
-                                                Container(
-                                                  height: 1,
-                                                  color: Colors.white10,
-                                                  margin: const EdgeInsets.only(bottom: 16),
-                                                ),
-                                                // Exercise names column
-                                                ...List.generate(dayExercises.length, (idx) {
-                                                  final exercise = dayExercises[idx];
-                                                  final name = exercise['name'] ?? 'Bilinmeyen Egzersiz';
-                                                  final sets = exercise['set_count'] ?? 4;
-                                                  final reps = exercise['rep_count'] ?? '10';
+                        // Extract day name from key like "Pazartesi — Gün 1"
+                        final String dayName = dayKey.split(' — ').first.trim();
+                        final bool isToday = _todayDayName != null && dayName == _todayDayName;
+                        final bool canStart = isToday && _todayState == 'workout_time';
+                        final bool isDone = isToday && _todayState == 'already_done';
 
-                                                  return Padding(
-                                                    padding: const EdgeInsets.only(bottom: 12.0),
-                                                    child: Row(
-                                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                                      children: [
-                                                        Container(
-                                                          height: 8,
-                                                          width: 8,
-                                                          decoration: const BoxDecoration(
-                                                            color: Color(0xFF00FF87),
-                                                            shape: BoxShape.circle,
-                                                          ),
-                                                        ),
-                                                        const SizedBox(width: 12),
-                                                        Expanded(
-                                                          child: Text(
-                                                            name,
-                                                            style: const TextStyle(
-                                                              color: Colors.white70,
-                                                              fontSize: 14,
-                                                              fontWeight: FontWeight.w500,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        Text(
-                                                          '${sets}x$reps',
-                                                          style: const TextStyle(
-                                                            color: Colors.white30,
-                                                            fontSize: 12,
-                                                            fontWeight: FontWeight.bold,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                }),
-                                                const SizedBox(height: 20),
-                                                // Action button
-                                                SizedBox(
-                                                  width: double.infinity,
-                                                  height: 48,
-                                                  child: ElevatedButton(
-                                                    style: ElevatedButton.styleFrom(
-                                                      backgroundColor: const Color(0xFF00FF87),
-                                                      foregroundColor: Colors.black,
-                                                      shape: RoundedRectangleBorder(
-                                                        borderRadius: BorderRadius.circular(12),
-                                                      ),
-                                                      elevation: 6,
-                                                      shadowColor: const Color(0xFF00FF87).withValues(alpha: 0.3),
-                                                    ),
-                                                    onPressed: () {
-                                                      Navigator.of(context).push(
-                                                        MaterialPageRoute(
-                                                          builder: (context) => WorkoutSessionScreen(
-                                                            exercisesRaw: dayExercises,
-                                                            programId: _programId,
-                                                          ),
-                                                        ),
-                                                      );
-                                                    },
-                                                    child: Row(
-                                                      mainAxisAlignment: MainAxisAlignment.center,
-                                                      children: [
-                                                        const Icon(Icons.play_circle_fill_rounded, size: 20),
-                                                        const SizedBox(width: 8),
-                                                        Text(
-                                                          'Antrenmanı Başlat',
-                                                          style: const TextStyle(
-                                                            fontSize: 14,
-                                                            fontWeight: FontWeight.bold,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
+                        return _buildDayTile(
+                          dayKey: dayKey,
+                          dayExercises: dayExercises,
+                          isToday: isToday,
+                          canStart: canStart,
+                          isDone: isDone,
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBanner() {
+    Color bannerColor;
+    IconData bannerIcon;
+
+    switch (_todayState) {
+      case 'workout_time':
+        bannerColor = const Color(0xFF00FF87);
+        bannerIcon = Icons.fitness_center_rounded;
+        break;
+      case 'already_done':
+        bannerColor = const Color(0xFF00FF87);
+        bannerIcon = Icons.check_circle_rounded;
+        break;
+      case 'rest':
+      default:
+        bannerColor = const Color(0xFF6366F1);
+        bannerIcon = Icons.local_cafe_rounded;
+        break;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: bannerColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: bannerColor.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(bannerIcon, color: bannerColor, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _statusMessage ?? '',
+              style: TextStyle(color: bannerColor, fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDayTile({
+    required String dayKey,
+    required List<dynamic> dayExercises,
+    required bool isToday,
+    required bool canStart,
+    required bool isDone,
+  }) {
+    final Color accentColor = isToday ? const Color(0xFF00FF87) : Colors.white24;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        boxShadow: isToday
+            ? [
+                BoxShadow(
+                  color: const Color(0xFF00FF87).withValues(alpha: 0.08),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                )
+              ]
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ],
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: ExpansionTile(
+            collapsedBackgroundColor: const Color(0xFF161F30),
+            backgroundColor: const Color(0xFF1E293B),
+            iconColor: accentColor,
+            collapsedIconColor: isToday ? accentColor : Colors.white38,
+            title: Row(
+              children: [
+                if (isToday)
+                  Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: isDone
+                          ? const Color(0xFF00FF87).withValues(alpha: 0.15)
+                          : const Color(0xFF00FF87).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                          color: const Color(0xFF00FF87).withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      isDone ? 'Tamamlandı' : 'Bugün',
+                      style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF00FF87),
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                Expanded(
+                  child: Text(
+                    dayKey,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: isToday ? Colors.white : Colors.white60,
+                    ),
+                  ),
+                ),
+                if (!isToday)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 4),
+                    child: Icon(Icons.lock_rounded, color: Colors.white24, size: 16),
+                  ),
+              ],
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '${dayExercises.length} Egzersiz',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: isToday ? Colors.blueGrey[300] : Colors.white24),
+              ),
+            ),
+            children: [
+              Container(
+                padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20, top: 8),
+                color: const Color(0xFF1E293B),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 1,
+                      color: Colors.white10,
+                      margin: const EdgeInsets.only(bottom: 16),
+                    ),
+                    ...List.generate(dayExercises.length, (idx) {
+                      final exercise = dayExercises[idx];
+                      final name = exercise['name'] ?? 'Bilinmeyen Egzersiz';
+                      final sets = exercise['set_count'] ?? 4;
+                      final reps = exercise['rep_count'] ?? '10';
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Container(
+                              height: 8,
+                              width: 8,
+                              decoration: BoxDecoration(
+                                color: isToday
+                                    ? const Color(0xFF00FF87)
+                                    : Colors.white24,
+                                shape: BoxShape.circle,
+                              ),
                             ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAlreadyDoneState() {
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(height: 20),
-            // Glowing Green Badge
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: const Color(0xFF00FF87).withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: const Color(0xFF00FF87).withValues(alpha: 0.15),
-                  width: 2.0,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF00FF87).withValues(alpha: 0.1),
-                    blurRadius: 30,
-                    spreadRadius: 2,
-                  )
-                ],
-              ),
-              child: const Icon(
-                Icons.check_circle_rounded,
-                color: Color(0xFF00FF87),
-                size: 64,
-              ),
-            ),
-            const SizedBox(height: 32),
-            const Text(
-              'Bugünlük Bu Kadar! 🎉',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 0.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Tebrikler, bugünün idmanını başarıyla tamamladın.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.blueGrey[200],
-              ),
-            ),
-            const SizedBox(height: 32),
-            // Glass container for the API message
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF161F30),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFF00FF87).withValues(alpha: 0.1),
-                ),
-              ),
-              child: Text(
-                _statusMessage ?? 'Bugün yeterince ter döktün! Yarına kadar antrenman yok.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 14.5,
-                  color: Colors.white70,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRestState() {
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(height: 20),
-            // Glowing Coffee Cup Badge
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: const Color(0xFF6366F1).withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: const Color(0xFF6366F1).withValues(alpha: 0.15),
-                  width: 2.0,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF6366F1).withValues(alpha: 0.1),
-                    blurRadius: 30,
-                    spreadRadius: 2,
-                  )
-                ],
-              ),
-              child: const Icon(
-                Icons.local_cafe_rounded,
-                color: Color(0xFF818CF8),
-                size: 64,
-              ),
-            ),
-            const SizedBox(height: 32),
-            const Text(
-              'Dinlenme Günü ☕',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 0.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Bugün vücudunu ve kaslarını toparlama vakti.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.blueGrey[200],
-              ),
-            ),
-            const SizedBox(height: 32),
-            // Glass container for the API message
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF161F30),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                name,
+                                style: TextStyle(
+                                  color: isToday ? Colors.white70 : Colors.white38,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '${sets}x$reps',
+                              style: TextStyle(
+                                color: isToday ? Colors.white30 : Colors.white24,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 20),
+                    if (canStart)
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00FF87),
+                            foregroundColor: Colors.black,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 6,
+                            shadowColor:
+                                const Color(0xFF00FF87).withValues(alpha: 0.3),
+                          ),
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => WorkoutSessionScreen(
+                                  exercisesRaw: dayExercises,
+                                  programName: _programTitle,
+                                ),
+                              ),
+                            );
+                          },
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.play_circle_fill_rounded, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                'Antrenmanı Başlat',
+                                style: TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else if (isDone)
+                      Container(
+                        width: double.infinity,
+                        height: 48,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00FF87).withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: const Color(0xFF00FF87).withValues(alpha: 0.2)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.check_circle_rounded,
+                                color: Color(0xFF00FF87), size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Bugünkü Antrenman Tamamlandı',
+                              style: TextStyle(
+                                  color: Color(0xFF00FF87),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Container(
+                        width: double.infinity,
+                        height: 48,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.lock_rounded, color: Colors.white24, size: 18),
+                            SizedBox(width: 8),
+                            Text(
+                              'Sadece bu gün açılabilir',
+                              style: TextStyle(
+                                  color: Colors.white24,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              child: Text(
-                _statusMessage ?? 'Bugün dinlenme günün! Kaslarını toparla, zorlamanın alemi yok.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 14.5,
-                  color: Colors.white70,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -609,29 +560,20 @@ class _WorkoutScheduleScreenState extends State<WorkoutScheduleScreen> {
                 color: Colors.white.withValues(alpha: 0.02),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.calendar_today_rounded,
-                color: Colors.white24,
-                size: 48,
-              ),
+              child: const Icon(Icons.calendar_today_rounded,
+                  color: Colors.white24, size: 48),
             ),
             const SizedBox(height: 24),
             const Text(
               'Takvim Bulunamadı',
               style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
+                  fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             const SizedBox(height: 8),
             const Text(
               'Sizin için hazırlanmış herhangi bir takvim bulunamadı.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.white54,
-              ),
+              style: TextStyle(fontSize: 13, color: Colors.white54),
             ),
           ],
         ),
